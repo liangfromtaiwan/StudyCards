@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#4255ff">
+<title>StudyCards</title>
+<style>
+  :root {
+    --primary: #4255ff;
+    --primary-dark: #3644d9;
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --text: #282e3e;
+    --muted: #646f90;
+    --border: #e5e8f0;
+    --green: #23b26d;
+    --red: #ff4f64;
+    --yellow: #ffcd1f;
+    --radius: 16px;
+    --shadow: 0 2px 8px rgba(40,46,62,.08);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh;
+  }
+  #app { max-width: 640px; margin: 0 auto; padding: 20px 16px 100px; }
+
+  /* ---------- Header ---------- */
+  header {
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom: 20px;
+  }
+  .logo { font-size: 22px; font-weight: 800; color: var(--primary); letter-spacing:-.5px; cursor:pointer; }
+  .logo span { color: var(--text); }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    border:none; border-radius: 12px; cursor:pointer;
+    font-size: 15px; font-weight: 600; padding: 12px 20px;
+    background: var(--primary); color:#fff;
+    transition: transform .1s, background .15s;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn.secondary { background:#fff; color: var(--text); border:1.5px solid var(--border); }
+  .btn.ghost { background:transparent; color: var(--muted); padding:8px 12px; }
+  .btn.danger { background:#fff; color: var(--red); border:1.5px solid var(--border); }
+  .btn.small { padding: 8px 14px; font-size: 13px; border-radius:10px; }
+  .btn.full { width:100%; }
+
+  /* ---------- Home: set list ---------- */
+  .section-title { font-size: 14px; font-weight:700; color: var(--muted); text-transform:uppercase; letter-spacing:.8px; margin: 24px 0 12px; }
+  .set-card {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 18px; margin-bottom: 12px; cursor:pointer;
+    border: 1.5px solid transparent; transition: border-color .15s;
+  }
+  .set-card:hover { border-color: var(--primary); }
+  .set-card h3 { font-size: 17px; margin-bottom: 4px; }
+  .set-card .meta { font-size: 13px; color: var(--muted); }
+  .empty-state { text-align:center; padding: 60px 20px; color: var(--muted); }
+  .empty-state .big { font-size: 48px; margin-bottom: 12px; }
+
+  /* ---------- Set detail ---------- */
+  .back { color: var(--muted); font-size:14px; font-weight:600; cursor:pointer; margin-bottom:16px; display:inline-flex; align-items:center; gap:6px; }
+  .set-title { font-size: 26px; font-weight: 800; margin-bottom: 4px; letter-spacing:-.5px;}
+  .set-sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+  .mode-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+  .mode-btn {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 18px 16px; cursor:pointer; border:1.5px solid transparent;
+    display:flex; flex-direction:column; gap:6px; transition: border-color .15s;
+  }
+  .mode-btn:hover { border-color: var(--primary); }
+  .mode-btn .icon { font-size: 24px; }
+  .mode-btn .label { font-weight: 700; font-size: 15px; }
+  .mode-btn .desc { font-size: 12px; color: var(--muted); }
+  .term-row {
+    background: var(--card); border-radius: 12px; box-shadow: var(--shadow);
+    padding: 14px 16px; margin-bottom: 10px;
+    display:flex; align-items:center; gap:14px;
+  }
+  .term-row .term { font-weight: 700; flex: 0 0 38%; word-break: break-word; }
+  .term-row .def { color: var(--muted); font-size: 14px; flex:1; word-break: break-word; border-left: 2px solid var(--border); padding-left: 14px; }
+
+  /* ---------- Flashcards ---------- */
+  .study-top { display:flex; align-items:center; justify-content:space-between; margin-bottom: 16px; }
+  .progress-text { font-weight: 700; color: var(--muted); font-size: 14px; }
+  .progress-bar { height: 5px; background: var(--border); border-radius: 3px; margin-bottom: 24px; overflow:hidden; }
+  .progress-bar .fill { height:100%; background: var(--primary); border-radius:3px; transition: width .25s; }
+
+  .flip-scene { perspective: 1200px; margin-bottom: 20px; }
+  .flip-card {
+    position: relative; width: 100%; height: 340px;
+    transform-style: preserve-3d; transition: transform .45s cubic-bezier(.4,.1,.2,1);
+    cursor:pointer;
+  }
+  .flip-card.flipped { transform: rotateX(180deg); }
+  .flip-face {
+    position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden;
+    background: var(--card); border-radius: 20px; box-shadow: 0 4px 16px rgba(40,46,62,.12);
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    padding: 32px; font-size: 26px; font-weight: 600; word-break: break-word; overflow:auto;
+  }
+  .flip-face .hint { position:absolute; top:16px; left:0; right:0; font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+  .flip-face.backside { transform: rotateX(180deg); }
+  .fc-controls { display:flex; justify-content:center; align-items:center; gap:16px; }
+  .nav-btn {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--card); border: 1.5px solid var(--border); box-shadow: var(--shadow);
+    font-size: 22px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    color: var(--text); transition: transform .1s;
+  }
+  .nav-btn:active { transform: scale(.92); }
+  .nav-btn:disabled { opacity:.35; cursor:default; }
+  .fc-tip { text-align:center; color: var(--muted); font-size: 13px; margin-top: 16px; }
+
+  /* ---------- Quiz ---------- */
+  .quiz-q {
+    background: var(--card); border-radius: 20px; box-shadow: var(--shadow);
+    padding: 28px 24px; margin-bottom: 20px;
+  }
+  .quiz-q .qlabel { font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; }
+  .quiz-q .qtext { font-size: 24px; font-weight: 700; word-break: break-word; }
+  .choice {
+    width:100%; text-align:left; background: var(--card);
+    border: 2px solid var(--border); border-radius: 12px;
+    padding: 16px; font-size: 16px; font-weight:500; color: var(--text);
+    margin-bottom: 10px; cursor:pointer; transition: border-color .15s, background .15s;
+  }
+  .choice:hover { border-color: var(--primary); }
+  .choice.correct { border-color: var(--green); background: #e9f9f1; font-weight:700; }
+  .choice.wrong { border-color: var(--red); background: #ffeef0; }
+  .choice:disabled { cursor:default; }
+  .feedback { text-align:center; font-weight:800; font-size:16px; height:24px; margin-bottom: 12px; }
+  .feedback.good { color: var(--green); }
+  .feedback.bad { color: var(--red); }
+
+  /* ---------- Results ---------- */
+  .result-card { background:var(--card); border-radius:20px; box-shadow:var(--shadow); padding:40px 24px; text-align:center; }
+  .score-ring { font-size: 56px; font-weight: 800; color: var(--primary); }
+  .result-card p { color: var(--muted); margin: 8px 0 24px; }
+  .result-actions { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+
+  /* ---------- Editor ---------- */
+  .field { margin-bottom: 16px; }
+  .field label { display:block; font-size:13px; font-weight:700; color:var(--muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px; }
+  input[type=text], input[type=password], input[type=email], textarea {
+    width:100%; border:1.5px solid var(--border); border-radius:12px;
+    padding: 13px 14px; font-size: 16px; font-family:inherit; background:var(--card); color:var(--text);
+    outline:none; transition: border-color .15s; resize:none;
+  }
+  input[type=text]:focus, input[type=password]:focus, input[type=email]:focus, textarea:focus { border-color: var(--primary); }
+
+  /* ---------- Auth ---------- */
+  .auth-card {
+    background: var(--card); border-radius: 20px; box-shadow: var(--shadow);
+    padding: 32px 24px; max-width: 400px; margin: 40px auto 0;
+  }
+  .auth-card h2 { font-size: 24px; font-weight: 800; margin-bottom: 6px; letter-spacing: -.5px; }
+  .auth-sub { color: var(--muted); font-size: 14px; margin-bottom: 22px; }
+  .auth-links { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; text-align: center; }
+  .auth-links a { color: var(--primary); font-size: 14px; font-weight: 600; cursor: pointer; }
+  .auth-links a:hover { text-decoration: underline; }
+  .sync-badge { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .auth-divider {
+    display: flex; align-items: center; gap: 12px; margin: 16px 0;
+    color: var(--muted); font-size: 13px; font-weight: 600;
+  }
+  .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1.5px; background: var(--border); }
+  .card-edit {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 16px; margin-bottom: 12px; position:relative;
+  }
+  .card-edit .num { font-size:12px; font-weight:800; color:var(--muted); margin-bottom:10px; }
+  .card-edit .remove {
+    position:absolute; top:12px; right:12px; background:none; border:none;
+    color: var(--muted); cursor:pointer; font-size:18px; padding:4px;
+  }
+  .card-edit .remove:hover { color: var(--red); }
+  .card-edit .pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media (max-width:480px){ .card-edit .pair { grid-template-columns:1fr; } }
+  .editor-actions { display:flex; gap:12px; margin-top:20px; }
+  .editor-actions .btn { flex:1; }
+
+  /* ---------- Speaker button ---------- */
+  .speak-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 18px; padding: 4px 6px; border-radius: 8px;
+    color: var(--primary); line-height: 1; flex-shrink: 0;
+    transition: transform .1s, background .15s;
+  }
+  .speak-btn:hover { background: #eef0ff; }
+  .speak-btn:active { transform: scale(.9); }
+  .speak-btn.speaking { animation: pulse .8s ease infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .flip-face .speak-btn {
+    position: absolute; top: 12px; right: 14px; font-size: 22px; z-index: 2;
+  }
+  .qtext-row { display: flex; align-items: center; gap: 10px; }
+
+  /* ---------- Toast ---------- */
+  #toast {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: var(--text); color:#fff; padding: 12px 22px; border-radius: 12px;
+    font-size: 14px; font-weight:600; opacity:0; transition: all .3s; z-index: 100; pointer-events:none;
+    max-width: 90vw;
+  }
+  #toast.show { opacity:1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>
+/* =====================  Firebase config  =====================
+   To enable login + cloud sync:
+   1. Go to https://console.firebase.google.com → create a project
+   2. Build → Authentication → Get started → enable "Email/Password"
+   3. Build → Firestore Database → Create database
+   4. Project settings → Your apps → Web app → copy the config values below
+   Until you fill these in, the app runs in local-only mode (no login). */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDPn02ZHD4llU_I2roo4xN5YJUbuuSfVeU",
+  authDomain: "studycards-611b4.firebaseapp.com",
+  projectId: "studycards-611b4",
+  storageBucket: "studycards-611b4.firebasestorage.app",
+  messagingSenderId: "700809161787",
+  appId: "1:700809161787:web:0ddbb3b6debe49fcaf801e"
+};
+const FIREBASE_ENABLED = typeof firebase !== 'undefined' && !/PASTE/.test(FIREBASE_CONFIG.apiKey);
+
+/* =====================  Data  ===================== */
+const STORAGE_KEY = 'studycards.sets.v1';
+
+const SAMPLE_SETS = [
+  {
+    id: 'sample-1',
+    title: 'Essential English Vocabulary',
+    cards: [
+      { term: 'abundant', def: 'existing in large quantities; plentiful' },
+      { term: 'benevolent', def: 'well meaning and kindly' },
+      { term: 'candid', def: 'truthful and straightforward; frank' },
+      { term: 'diligent', def: 'showing care and effort in one\'s work' },
+      { term: 'eloquent', def: 'fluent and persuasive in speaking or writing' },
+      { term: 'feasible', def: 'possible to do easily or conveniently' },
+      { term: 'gratitude', def: 'the quality of being thankful' },
+      { term: 'meticulous', def: 'showing great attention to detail; very careful' },
+    ],
+  },
+  {
+    id: 'sample-2',
+    title: 'World Capitals',
+    cards: [
+      { term: 'Japan', def: 'Tokyo' },
+      { term: 'France', def: 'Paris' },
+      { term: 'Canada', def: 'Ottawa' },
+      { term: 'Australia', def: 'Canberra' },
+      { term: 'Brazil', def: 'Brasília' },
+      { term: 'South Korea', def: 'Seoul' },
+    ],
+  },
+];
+
+function loadSets() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* ignore */ }
+  return JSON.parse(JSON.stringify(SAMPLE_SETS));
+}
+function saveSets() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) { /* ignore */ }
+  if (user && db) {
+    db.collection('users').doc(user.uid)
+      .set({ sets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+      .catch(e => toast('Cloud sync failed: ' + e.message));
+  }
+}
+let sets = loadSets();
+let user = null, db = null;
+saveSets();
+
+/* =====================  State & helpers  ===================== */
+let state = { view: 'home' };
+const app = document.getElementById('app');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => 'set-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const getSet = id => sets.find(s => s.id === id);
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove('show'), 2200);
+}
+function go(view, extra = {}) { state = { view, ...extra }; render(); window.scrollTo(0, 0); }
+
+/* =====================  Text-to-speech  ===================== */
+let voicesReady = [];
+function loadVoices() { voicesReady = speechSynthesis.getVoices(); }
+if ('speechSynthesis' in window) {
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+function pickVoice(isZh) {
+  const norm = v => (v.lang || '').replace('_', '-').toLowerCase();
+  if (isZh) {
+    const prefer = ['Mei-Jia', 'Meijia', 'Google 國語', 'HsiaoChen', 'Yating', 'Hanhan', 'Tingting'];
+    for (const name of prefer) {
+      const v = voicesReady.find(v => v.name.includes(name));
+      if (v) return v;
+    }
+    return voicesReady.find(v => norm(v) === 'zh-tw')
+        || voicesReady.find(v => norm(v).startsWith('zh'))
+        || null;
+  }
+  const prefer = ['Samantha', 'Google US English', 'Microsoft Aria', 'Microsoft Zira', 'Daniel'];
+  for (const name of prefer) {
+    const v = voicesReady.find(v => v.name.includes(name));
+    if (v) return v;
+  }
+  return voicesReady.find(v => norm(v) === 'en-us') || voicesReady.find(v => norm(v).startsWith('en')) || null;
+}
+function speak(text, btn) {
+  if (!('speechSynthesis' in window)) { toast('Speech is not supported in this browser'); return; }
+  if (!voicesReady.length) loadVoices(); // voices may load lazily
+  speechSynthesis.cancel();
+  document.querySelectorAll('.speak-btn.speaking').forEach(b => b.classList.remove('speaking'));
+  const isZh = /[㐀-䶿一-鿿豈-﫿]/.test(text);
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = isZh ? 'zh-TW' : 'en-US';
+  u.rate = 0.95;
+  const v = pickVoice(isZh);
+  if (v) u.voice = v;
+  if (btn) {
+    btn.classList.add('speaking');
+    u.onend = u.onerror = () => btn.classList.remove('speaking');
+  }
+  speechSynthesis.speak(u);
+}
+function speakBtn(text, extraClass = '') {
+  return `<button class="speak-btn ${extraClass}" title="Listen" onclick="event.stopPropagation(); speak(this.dataset.t, this)" data-t="${esc(text)}">🔊</button>`;
+}
+
+/* =====================  Auto-translate (EN → 繁體中文)  ===================== */
+async function translateEn2Zh(text) {
+  // Primary: Google Translate public endpoint
+  try {
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=' + encodeURIComponent(text);
+    const r = await fetch(url);
+    if (r.ok) {
+      const j = await r.json();
+      const out = (j[0] || []).map(seg => seg[0]).join('').trim();
+      if (out) return out;
+    }
+  } catch (e) { /* fall through */ }
+  // Fallback: MyMemory
+  const r2 = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|zh-TW');
+  const j2 = await r2.json();
+  const out2 = j2 && j2.responseData && j2.responseData.translatedText;
+  if (!out2) throw new Error('no translation');
+  return out2.trim();
+}
+
+function autoTranslate(termInput, i) {
+  clearTimeout(termInput._t);
+  const text = termInput.value.trim();
+  if (!text || !/[a-zA-Z]/.test(text)) return;
+  termInput._t = setTimeout(async () => {
+    const defInput = termInput.nextElementSibling;
+    if (!defInput) return;
+    // don't overwrite a definition the user typed themselves
+    if (defInput.dataset.manual === '1') return;
+    defInput.placeholder = 'Translating…';
+    try {
+      const zh = await translateEn2Zh(text);
+      // update only if the term hasn't changed meanwhile and the def wasn't manually edited
+      if (termInput.value.trim() === text && defInput.dataset.manual !== '1' && ed && ed.cards[i]) {
+        defInput.value = zh;
+        ed.cards[i].def = zh;
+      }
+    } catch (e) {
+      const isSafariLocalFile = location.protocol === 'file:' && /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+      toast(isSafariLocalFile
+        ? 'Safari blocks translation for local files — please open this file with Chrome'
+        : 'Auto-translate failed (' + e.message + ') — check your internet connection');
+    }
+    defInput.placeholder = 'Definition';
+  }, 700);
+}
+
+/* =====================  Views  ===================== */
+function render() {
+  const v = state.view;
+  if (v === 'login') renderLogin();
+  else if (v === 'home') renderHome();
+  else if (v === 'set') renderSet();
+  else if (v === 'flashcards') renderFlashcards();
+  else if (v === 'quiz') renderQuiz();
+  else if (v === 'quizResult') renderQuizResult();
+  else if (v === 'edit') renderEditor();
+}
+
+/* ----- Login ----- */
+function renderLogin() {
+  const su = !!state.signup;
+  app.innerHTML = `
+    <header><div class="logo">Study<span>Cards</span></div></header>
+    <div class="auth-card">
+      <h2>${su ? 'Create your account' : 'Welcome back'}</h2>
+      <div class="auth-sub">${su ? 'Sign up to sync your study sets across all your devices.' : 'Sign in to access your study sets on any device.'}</div>
+      <div class="field"><label>Email</label><input type="email" id="auth-email" placeholder="you@example.com" autocomplete="username"></div>
+      <div class="field"><label>Password</label><input type="password" id="auth-pw" placeholder="At least 6 characters" autocomplete="${su ? 'new-password' : 'current-password'}" onkeydown="if(event.key==='Enter')doAuth(${su})"></div>
+      <button class="btn full" onclick="doAuth(${su})">${su ? 'Create account' : 'Sign in'}</button>
+      <div class="auth-divider"><span>or</span></div>
+      <button class="btn secondary full" onclick="doGoogleAuth()">
+        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        Continue with Google
+      </button>
+      <div class="auth-links">
+        <a onclick="go('login',{signup:${!su}})">${su ? 'Already have an account? Sign in' : 'New here? Create an account'}</a>
+        ${su ? '' : `<a onclick="doReset()">Forgot password?</a>`}
+        <a onclick="go('home')">Continue without an account →</a>
+      </div>
+    </div>`;
+}
+async function doAuth(signup) {
+  const email = document.getElementById('auth-email').value.trim();
+  const pw = document.getElementById('auth-pw').value;
+  if (!email || !pw) { toast('Please enter your email and password'); return; }
+  try {
+    if (signup) await firebase.auth().createUserWithEmailAndPassword(email, pw);
+    else await firebase.auth().signInWithEmailAndPassword(email, pw);
+    // onAuthStateChanged takes over from here
+  } catch (e) {
+    const msgs = {
+      'auth/invalid-email': 'That email address looks invalid',
+      'auth/email-already-in-use': 'This email is already registered — try signing in',
+      'auth/weak-password': 'Password must be at least 6 characters',
+      'auth/invalid-credential': 'Wrong email or password',
+      'auth/wrong-password': 'Wrong email or password',
+      'auth/user-not-found': 'No account with this email — try creating one',
+      'auth/too-many-requests': 'Too many attempts — please wait a moment',
+    };
+    toast(msgs[e.code] || e.message);
+  }
+}
+async function doGoogleAuth() {
+  if (location.protocol === 'file:') {
+    toast('Google sign-in only works when the app is hosted online — use email/password for now');
+    return;
+  }
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await firebase.auth().signInWithPopup(provider);
+    // onAuthStateChanged takes over from here
+  } catch (e) {
+    if (e.code === 'auth/popup-blocked') {
+      try { await firebase.auth().signInWithRedirect(new firebase.auth.GoogleAuthProvider()); } catch (e2) { toast(e2.message); }
+    } else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+      toast(e.message);
+    }
+  }
+}
+async function doReset() {
+  const email = document.getElementById('auth-email').value.trim();
+  if (!email) { toast('Enter your email first, then tap "Forgot password?"'); return; }
+  try {
+    await firebase.auth().sendPasswordResetEmail(email);
+    toast('Password reset email sent — check your inbox');
+  } catch (e) { toast(e.message); }
+}
+function doSignOut() {
+  firebase.auth().signOut();
+}
+async function loadCloudSets() {
+  try {
+    const snap = await db.collection('users').doc(user.uid).get();
+    const data = snap.exists ? snap.data() : null;
+    if (data && Array.isArray(data.sets)) {
+      sets = data.sets;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) {}
+    } else {
+      // first sign-in on this account: upload whatever is stored locally
+      saveSets();
+    }
+  } catch (e) {
+    toast('Could not load your cloud data: ' + e.message);
+  }
+}
+
+/* ----- Home ----- */
+function renderHome() {
+  const acct = !FIREBASE_ENABLED ? '' : user
+    ? `<span class="sync-badge" title="${esc(user.email)}">☁️ Synced</span> <button class="btn ghost small" onclick="doSignOut()">Sign out</button>`
+    : `<button class="btn ghost small" onclick="go('login')">Sign in</button>`;
+  let html = `
+    <header>
+      <div class="logo" onclick="go('home')">Study<span>Cards</span></div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        ${acct}
+        <button class="btn small" onclick="openEditor()">＋ New set</button>
+      </div>
+    </header>
+    <div class="section-title">Your study sets</div>`;
+  if (!sets.length) {
+    html += `<div class="empty-state"><div class="big">📚</div><p>No study sets yet.<br>Create your first one!</p><br><button class="btn" onclick="openEditor()">＋ Create a set</button></div>`;
+  } else {
+    for (const s of sets) {
+      html += `
+        <div class="set-card" onclick="go('set',{setId:'${s.id}'})">
+          <h3>${esc(s.title)}</h3>
+          <div class="meta">${s.cards.length} terms</div>
+        </div>`;
+    }
+  }
+  app.innerHTML = html;
+}
+
+/* ----- Set detail ----- */
+function renderSet() {
+  const s = getSet(state.setId);
+  if (!s) return go('home');
+  const canQuiz = s.cards.length >= 2;
+  let html = `
+    <div class="back" onclick="go('home')">← All sets</div>
+    <div class="set-title">${esc(s.title)}</div>
+    <div class="set-sub">${s.cards.length} terms</div>
+    <div class="mode-grid">
+      <div class="mode-btn" onclick="startFlashcards('${s.id}')">
+        <div class="icon">🃏</div><div class="label">Flashcards</div><div class="desc">Flip cards to review</div>
+      </div>
+      <div class="mode-btn" onclick="${canQuiz ? `startQuiz('${s.id}')` : `toast('Add at least 2 cards to take a quiz')`}">
+        <div class="icon">✍️</div><div class="label">Quiz</div><div class="desc">Multiple choice test</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; margin-bottom:24px;">
+      <button class="btn secondary small" onclick="openEditor('${s.id}')">✎ Edit set</button>
+      <button class="btn danger small" onclick="deleteSet('${s.id}')">🗑 Delete</button>
+    </div>
+    <div class="section-title">Terms in this set</div>`;
+  for (const c of s.cards) {
+    html += `<div class="term-row"><div class="term">${esc(c.term)}</div><div class="def">${esc(c.def)}</div>${speakBtn(c.term)}</div>`;
+  }
+  app.innerHTML = html;
+}
+
+function deleteSet(id) {
+  if (!confirm('Delete this set? This cannot be undone.')) return;
+  sets = sets.filter(s => s.id !== id);
+  saveSets();
+  toast('Set deleted');
+  go('home');
+}
+
+/* ----- Flashcards ----- */
+let fc = null;
+function startFlashcards(setId) {
+  const s = getSet(setId);
+  if (!s || !s.cards.length) { toast('This set has no cards yet'); return; }
+  fc = { setId, order: shuffle(s.cards), i: 0, flipped: false };
+  go('flashcards', { setId });
+}
+function renderFlashcards() {
+  const s = getSet(state.setId);
+  if (!s || !fc) return go('home');
+  const card = fc.order[fc.i];
+  const pct = ((fc.i + 1) / fc.order.length) * 100;
+  app.innerHTML = `
+    <div class="study-top">
+      <div class="back" onclick="go('set',{setId:'${s.id}'})" style="margin:0">✕ Exit</div>
+      <div class="progress-text">${fc.i + 1} / ${fc.order.length}</div>
+      <button class="btn ghost small" onclick="shuffleFc()">🔀 Shuffle</button>
+    </div>
+    <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>
+    <div class="flip-scene">
+      <div class="flip-card ${fc.flipped ? 'flipped' : ''}" onclick="flipFc()">
+        <div class="flip-face"><div class="hint">Term</div>${speakBtn(card.term)}${esc(card.term)}</div>
+        <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def)}${esc(card.def)}</div>
+      </div>
+    </div>
+    <div class="fc-controls">
+      <button class="nav-btn" onclick="moveFc(-1)" ${fc.i === 0 ? 'disabled' : ''}>←</button>
+      <button class="nav-btn" onclick="moveFc(1)" ${fc.i === fc.order.length - 1 ? 'disabled' : ''}>→</button>
+    </div>
+    <div class="fc-tip">Tap the card to flip</div>`;
+}
+function flipFc() { fc.flipped = !fc.flipped; document.querySelector('.flip-card').classList.toggle('flipped', fc.flipped); }
+function moveFc(d) {
+  const n = fc.i + d;
+  if (n < 0 || n >= fc.order.length) return;
+  fc.i = n; fc.flipped = false;
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  renderFlashcards();
+}
+function shuffleFc() { fc.order = shuffle(fc.order); fc.i = 0; fc.flipped = false; renderFlashcards(); toast('Shuffled!'); }
+
+/* ----- Quiz ----- */
+let qz = null;
+function startQuiz(setId) {
+  const s = getSet(setId);
+  if (!s || s.cards.length < 2) { toast('Add at least 2 cards to take a quiz'); return; }
+  const qs = shuffle(s.cards).map(card => {
+    const wrongPool = shuffle(s.cards.filter(c => c.def !== card.def)).slice(0, 3).map(c => c.def);
+    return { term: card.term, answer: card.def, choices: shuffle([card.answer ?? card.def, ...wrongPool]) };
+  });
+  qz = { setId, qs, i: 0, score: 0, answered: false };
+  go('quiz', { setId });
+}
+function renderQuiz() {
+  const s = getSet(state.setId);
+  if (!s || !qz) return go('home');
+  const q = qz.qs[qz.i];
+  const pct = (qz.i / qz.qs.length) * 100;
+  let html = `
+    <div class="study-top">
+      <div class="back" onclick="go('set',{setId:'${s.id}'})" style="margin:0">✕ Exit</div>
+      <div class="progress-text">Question ${qz.i + 1} / ${qz.qs.length}</div>
+      <div style="width:60px"></div>
+    </div>
+    <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>
+    <div class="quiz-q">
+      <div class="qlabel">What is the definition of…</div>
+      <div class="qtext-row"><div class="qtext">${esc(q.term)}</div>${speakBtn(q.term)}</div>
+    </div>
+    <div class="feedback" id="fb"></div>
+    <div id="choices">`;
+  q.choices.forEach((c, idx) => {
+    html += `<button class="choice" data-idx="${idx}" onclick="answerQuiz(${idx})">${esc(c)}</button>`;
+  });
+  html += `</div>`;
+  app.innerHTML = html;
+}
+function answerQuiz(idx) {
+  if (qz.answered) return;
+  qz.answered = true;
+  const q = qz.qs[qz.i];
+  const chosen = q.choices[idx];
+  const correct = chosen === q.answer;
+  if (correct) qz.score++;
+  const fb = document.getElementById('fb');
+  fb.textContent = correct ? 'Correct! 🎉' : 'Incorrect';
+  fb.className = 'feedback ' + (correct ? 'good' : 'bad');
+  document.querySelectorAll('.choice').forEach(btn => {
+    btn.disabled = true;
+    const c = q.choices[+btn.dataset.idx];
+    if (c === q.answer) btn.classList.add('correct');
+    else if (+btn.dataset.idx === idx) btn.classList.add('wrong');
+  });
+  setTimeout(() => {
+    qz.i++;
+    qz.answered = false;
+    if (qz.i >= qz.qs.length) go('quizResult', { setId: qz.setId });
+    else renderQuiz();
+  }, correct ? 900 : 1600);
+}
+function renderQuizResult() {
+  const s = getSet(state.setId);
+  if (!s || !qz) return go('home');
+  const pct = Math.round((qz.score / qz.qs.length) * 100);
+  const msg = pct === 100 ? 'Perfect score! 🏆' : pct >= 70 ? 'Nice work! 💪' : 'Keep practicing — you\'ll get there! 📖';
+  app.innerHTML = `
+    <div class="back" onclick="go('set',{setId:'${s.id}'})">← Back to set</div>
+    <div class="result-card">
+      <div class="score-ring">${pct}%</div>
+      <p>You got ${qz.score} out of ${qz.qs.length} correct.<br>${msg}</p>
+      <div class="result-actions">
+        <button class="btn" onclick="startQuiz('${s.id}')">Retake quiz</button>
+        <button class="btn secondary" onclick="startFlashcards('${s.id}')">Review flashcards</button>
+      </div>
+    </div>`;
+}
+
+/* ----- Editor ----- */
+let ed = null;
+function openEditor(setId) {
+  if (setId) {
+    const s = getSet(setId);
+    ed = { id: setId, title: s.title, cards: s.cards.map(c => ({ ...c })) };
+  } else {
+    ed = { id: null, title: '', cards: [{ term: '', def: '' }, { term: '', def: '' }, { term: '', def: '' }] };
+  }
+  go('edit');
+}
+function renderEditor() {
+  if (!ed) return go('home');
+  let html = `
+    <div class="back" onclick="cancelEdit()">← Cancel</div>
+    <div class="set-title" style="margin-bottom:20px">${ed.id ? 'Edit set' : 'Create a new set'}</div>
+    <div class="field">
+      <label>Title</label>
+      <input type="text" id="ed-title" placeholder="e.g. Biology Chapter 4" value="${esc(ed.title)}" oninput="ed.title=this.value">
+    </div>
+    <div class="section-title">Cards</div>
+    <div id="ed-cards">`;
+  ed.cards.forEach((c, i) => {
+    html += `
+      <div class="card-edit">
+        <button class="remove" title="Remove card" onclick="removeCard(${i})">✕</button>
+        <div class="num">CARD ${i + 1}</div>
+        <div class="pair">
+          <input type="text" placeholder="Term (English)" value="${esc(c.term)}" oninput="ed.cards[${i}].term=this.value; autoTranslate(this, ${i})">
+          <input type="text" placeholder="Definition" value="${esc(c.def)}" oninput="ed.cards[${i}].def=this.value; this.dataset.manual=this.value.trim()?'1':''">
+        </div>
+      </div>`;
+  });
+  html += `</div>
+    <button class="btn secondary full" onclick="addCard()">＋ Add card</button>
+    <div class="editor-actions">
+      <button class="btn secondary" onclick="cancelEdit()">Cancel</button>
+      <button class="btn" onclick="saveEdit()">${ed.id ? 'Save changes' : 'Create set'}</button>
+    </div>`;
+  app.innerHTML = html;
+}
+function addCard() { ed.cards.push({ term: '', def: '' }); renderEditor(); window.scrollTo(0, document.body.scrollHeight); }
+function removeCard(i) { ed.cards.splice(i, 1); if (!ed.cards.length) ed.cards.push({ term: '', def: '' }); renderEditor(); }
+function cancelEdit() { const back = ed && ed.id ? { view: 'set', setId: ed.id } : { view: 'home' }; ed = null; go(back.view, back); }
+function saveEdit() {
+  const title = ed.title.trim();
+  const cards = ed.cards.map(c => ({ term: c.term.trim(), def: c.def.trim() })).filter(c => c.term && c.def);
+  if (!title) { toast('Please enter a title'); return; }
+  if (!cards.length) { toast('Add at least one complete card'); return; }
+  if (ed.id) {
+    const s = getSet(ed.id);
+    s.title = title; s.cards = cards;
+    saveSets(); toast('Set updated');
+    const id = ed.id; ed = null;
+    go('set', { setId: id });
+  } else {
+    const s = { id: uid(), title, cards };
+    sets.unshift(s);
+    saveSets(); toast('Set created');
+    ed = null;
+    go('set', { setId: s.id });
+  }
+}
+
+/* ----- Keyboard shortcuts for flashcards ----- */
+document.addEventListener('keydown', e => {
+  if (state.view !== 'flashcards' || !fc) return;
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flipFc(); }
+  else if (e.key === 'ArrowRight') moveFc(1);
+  else if (e.key === 'ArrowLeft') moveFc(-1);
+});
+
+/* ----- Init ----- */
+if (FIREBASE_ENABLED) {
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+  state = { view: 'login' };
+  firebase.auth().onAuthStateChanged(async u => {
+    const wasSignedIn = !!user;
+    user = u;
+    if (u) {
+      await loadCloudSets();
+      go('home');
+      toast('Signed in as ' + u.email);
+    } else {
+      sets = loadSets();
+      if (wasSignedIn) { toast('Signed out'); go('login'); }
+      else render();
+    }
+  });
+} else {
+  render();
+}
+</script>
+</body>
+</html>
