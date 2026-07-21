@@ -321,7 +321,7 @@ if ('speechSynthesis' in window) {
 function pickVoice(isZh) {
   const norm = v => (v.lang || '').replace('_', '-').toLowerCase();
   if (isZh) {
-    const prefer = ['Mei-Jia', 'Meijia', 'Google 國語', 'HsiaoChen', 'Yating', 'Hanhan', 'Tingting'];
+    const prefer = ['Google 國語', '美佳', 'Mei-Jia', 'Meijia', 'HsiaoChen', 'Yating', 'Hanhan', '婷婷', 'Tingting'];
     for (const name of prefer) {
       const v = voicesReady.find(v => v.name.includes(name));
       if (v) return v;
@@ -330,7 +330,7 @@ function pickVoice(isZh) {
         || voicesReady.find(v => norm(v).startsWith('zh'))
         || null;
   }
-  const prefer = ['Samantha', 'Google US English', 'Microsoft Aria', 'Microsoft Zira', 'Daniel'];
+  const prefer = ['Google US English', 'Samantha', 'Microsoft Aria', 'Microsoft Zira', 'Daniel'];
   for (const name of prefer) {
     const v = voicesReady.find(v => v.name.includes(name));
     if (v) return v;
@@ -348,17 +348,6 @@ function speak(text, btn) {
   const isZh = /[㐀-䶿一-鿿豈-﫿]/.test(text);
   if (btn) btn.classList.add('speaking');
   const done = () => { if (btn) btn.classList.remove('speaking'); };
-  // Primary: Google Translate TTS — natural, human-like voice (needs internet, short text only)
-  if (text.length <= 190) {
-    const url = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl='
-      + (isZh ? 'zh-TW' : 'en') + '&q=' + encodeURIComponent(text);
-    const a = new Audio(url);
-    ttsAudio = a;
-    a.onended = done;
-    a.onerror = () => { ttsAudio = null; speakFallback(text, isZh, done); };
-    a.play().catch(() => { ttsAudio = null; speakFallback(text, isZh, done); });
-    return;
-  }
   speakFallback(text, isZh, done);
 }
 function speakFallback(text, isZh, done) {
@@ -371,7 +360,8 @@ function speakFallback(text, isZh, done) {
   const v = pickVoice(isZh);
   if (v) u.voice = v;
   u.onend = u.onerror = done;
-  speechSynthesis.speak(u);
+  // small delay avoids a Chrome bug where speak() right after cancel() is silently dropped
+  setTimeout(() => speechSynthesis.speak(u), 60);
 }
 function speakBtn(text, extraClass = '') {
   return `<button class="speak-btn ${extraClass}" title="Listen" onclick="event.stopPropagation(); speak(this.dataset.t, this)" data-t="${esc(text)}">🔊</button>`;
