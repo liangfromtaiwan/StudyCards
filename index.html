@@ -4,7 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="StudyCards">
 <meta name="theme-color" content="#4255ff">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>StudyCards</title>
 <style>
   :root {
@@ -332,21 +337,40 @@ function pickVoice(isZh) {
   }
   return voicesReady.find(v => norm(v) === 'en-us') || voicesReady.find(v => norm(v).startsWith('en')) || null;
 }
+let ttsAudio = null;
+function stopSpeaking() {
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  document.querySelectorAll('.speak-btn.speaking').forEach(b => b.classList.remove('speaking'));
+}
 function speak(text, btn) {
-  if (!('speechSynthesis' in window)) { toast('Speech is not supported in this browser'); return; }
+  stopSpeaking();
+  const isZh = /[㐀-䶿一-鿿豈-﫿]/.test(text);
+  if (btn) btn.classList.add('speaking');
+  const done = () => { if (btn) btn.classList.remove('speaking'); };
+  // Primary: Google Translate TTS — natural, human-like voice (needs internet, short text only)
+  if (text.length <= 190) {
+    const url = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl='
+      + (isZh ? 'zh-TW' : 'en') + '&q=' + encodeURIComponent(text);
+    const a = new Audio(url);
+    ttsAudio = a;
+    a.onended = done;
+    a.onerror = () => { ttsAudio = null; speakFallback(text, isZh, done); };
+    a.play().catch(() => { ttsAudio = null; speakFallback(text, isZh, done); });
+    return;
+  }
+  speakFallback(text, isZh, done);
+}
+function speakFallback(text, isZh, done) {
+  if (!('speechSynthesis' in window)) { done(); toast('Speech is not supported in this browser'); return; }
   if (!voicesReady.length) loadVoices(); // voices may load lazily
   speechSynthesis.cancel();
-  document.querySelectorAll('.speak-btn.speaking').forEach(b => b.classList.remove('speaking'));
-  const isZh = /[㐀-䶿一-鿿豈-﫿]/.test(text);
   const u = new SpeechSynthesisUtterance(text);
   u.lang = isZh ? 'zh-TW' : 'en-US';
   u.rate = 0.95;
   const v = pickVoice(isZh);
   if (v) u.voice = v;
-  if (btn) {
-    btn.classList.add('speaking');
-    u.onend = u.onerror = () => btn.classList.remove('speaking');
-  }
+  u.onend = u.onerror = done;
   speechSynthesis.speak(u);
 }
 function speakBtn(text, extraClass = '') {
@@ -601,7 +625,7 @@ function moveFc(d) {
   const n = fc.i + d;
   if (n < 0 || n >= fc.order.length) return;
   fc.i = n; fc.flipped = false;
-  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  stopSpeaking();
   renderFlashcards();
 }
 function shuffleFc() { fc.order = shuffle(fc.order); fc.i = 0; fc.flipped = false; renderFlashcards(); toast('Shuffled!'); }
@@ -753,6 +777,11 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight') moveFc(1);
   else if (e.key === 'ArrowLeft') moveFc(-1);
 });
+
+/* ----- PWA service worker ----- */
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 
 /* ----- Init ----- */
 if (FIREBASE_ENABLED) {
