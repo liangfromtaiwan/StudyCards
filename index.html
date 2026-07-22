@@ -320,22 +320,32 @@ if ('speechSynthesis' in window) {
 }
 function pickVoice(isZh) {
   const norm = v => (v.lang || '').replace('_', '-').toLowerCase();
-  if (isZh) {
-    const prefer = ['Google 國語', '美佳', 'Mei-Jia', 'Meijia', 'HsiaoChen', 'Yating', 'Hanhan', '婷婷', 'Tingting'];
-    for (const name of prefer) {
-      const v = voicesReady.find(v => v.name.includes(name));
-      if (v) return v;
-    }
-    return voicesReady.find(v => norm(v) === 'zh-tw')
-        || voicesReady.find(v => norm(v).startsWith('zh'))
-        || null;
-  }
-  const prefer = ['Google US English', 'Samantha', 'Microsoft Aria', 'Microsoft Zira', 'Daniel'];
-  for (const name of prefer) {
-    const v = voicesReady.find(v => v.name.includes(name));
+  const langMatch = isZh
+    ? (v => norm(v).startsWith('zh'))
+    : (v => norm(v).startsWith('en'));
+  const pool = voicesReady.filter(langMatch);
+  // 1) Downloaded high-quality local voices (macOS/Windows premium & enhanced)
+  const premium = pool.find(v => v.localService && /Premium|Enhanced|Natural/i.test(v.name));
+  if (premium) return premium;
+  // 2) Known-good local voices (network voices can be silently broken in Chrome)
+  const localPrefer = isZh
+    ? ['美佳', 'Mei-Jia', 'Meijia', 'HsiaoChen', 'Yating', 'Hanhan', '婷婷', 'Tingting']
+    : ['Samantha', 'Microsoft Aria', 'Microsoft Zira', 'Daniel', 'Karen', 'Moira'];
+  for (const name of localPrefer) {
+    const v = pool.find(v => v.localService && v.name.includes(name));
     if (v) return v;
   }
-  return voicesReady.find(v => norm(v) === 'en-us') || voicesReady.find(v => norm(v).startsWith('en')) || null;
+  // 3) Any local voice with the right accent
+  const anyLocal = pool.find(v => v.localService && (isZh ? norm(v) === 'zh-tw' : norm(v) === 'en-us'))
+    || pool.find(v => v.localService);
+  if (anyLocal) return anyLocal;
+  // 4) Last resort: network voices (e.g. Google US English)
+  const netPrefer = isZh ? ['Google 國語'] : ['Google US English'];
+  for (const name of netPrefer) {
+    const v = pool.find(v => v.name.includes(name));
+    if (v) return v;
+  }
+  return pool[0] || null;
 }
 let ttsAudio = null;
 function stopSpeaking() {
@@ -594,10 +604,8 @@ function renderFlashcards() {
   app.innerHTML = `
     <div class="study-top">
       <div class="back" onclick="go('set',{setId:'${s.id}'})" style="margin:0">✕ Exit</div>
-      <div class="progress-text">${fc.i + 1} / ${fc.order.length}</div>
       <button class="btn ghost small" onclick="shuffleFc()">🔀 Shuffle</button>
     </div>
-    <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>
     <div class="flip-scene">
       <div class="flip-card ${fc.flipped ? 'flipped' : ''}" onclick="flipFc()">
         <div class="flip-face"><div class="hint">Term</div>${speakBtn(card.term)}${esc(card.term)}</div>
@@ -606,8 +614,10 @@ function renderFlashcards() {
     </div>
     <div class="fc-controls">
       <button class="nav-btn" onclick="moveFc(-1)" ${fc.i === 0 ? 'disabled' : ''}>←</button>
+      <div class="progress-text">${fc.i + 1} / ${fc.order.length}</div>
       <button class="nav-btn" onclick="moveFc(1)" ${fc.i === fc.order.length - 1 ? 'disabled' : ''}>→</button>
     </div>
+    <div class="progress-bar" style="margin:20px 0 0"><div class="fill" style="width:${pct}%"></div></div>
     <div class="fc-tip">Tap the card to flip</div>`;
 }
 function flipFc() { fc.flipped = !fc.flipped; document.querySelector('.flip-card').classList.toggle('flipped', fc.flipped); }
@@ -622,10 +632,26 @@ function shuffleFc() { fc.order = shuffle(fc.order); fc.i = 0; fc.flipped = fals
 
 /* ----- Quiz ----- */
 let qz = null;
+const QUIZ_MAX = 6;
+// Weighted random sample without replacement: cards missed more often get picked more
+function weightedSample(cards, n) {
+  const pool = cards.map(c => ({ c, w: 1 + (c.misses || 0) * 2 }));
+  const out = [];
+  n = Math.min(n, pool.length);
+  for (let k = 0; k < n; k++) {
+    const total = pool.reduce((sum, p) => sum + p.w, 0);
+    let r = Math.random() * total;
+    let idx = pool.length - 1;
+    for (let i = 0; i < pool.length; i++) { r -= pool[i].w; if (r <= 0) { idx = i; break; } }
+    out.push(pool[idx].c);
+    pool.splice(idx, 1);
+  }
+  return out;
+}
 function startQuiz(setId) {
   const s = getSet(setId);
   if (!s || s.cards.length < 2) { toast('Add at least 2 cards to take a quiz'); return; }
-  const qs = shuffle(s.cards).map(card => {
+  const qs = weightedSample(s.cards, QUIZ_MAX).map(card => {
     const wrongPool = shuffle(s.cards.filter(c => c.def !== card.def)).slice(0, 3).map(c => c.def);
     return { term: card.term, answer: card.def, choices: shuffle([card.answer ?? card.def, ...wrongPool]) };
   });
@@ -653,8 +679,39 @@ function renderQuiz() {
   q.choices.forEach((c, idx) => {
     html += `<button class="choice" data-idx="${idx}" onclick="answerQuiz(${idx})">${esc(c)}</button>`;
   });
-  html += `</div>`;
+  html += `</div>
+    <div style="text-align:center; margin-top:8px;">
+      <button class="btn ghost" id="skip-btn" onclick="skipQuiz()">Skip →</button>
+    </div>`;
   app.innerHTML = html;
+}
+function skipQuiz() {
+  if (qz.answered) return;
+  qz.answered = true;
+  const q = qz.qs[qz.i];
+  q.chosen = null;
+  q.correct = false;
+  q.skipped = true;
+  // a skip counts as a miss so the word shows up more often next time
+  const srcSet = getSet(qz.setId);
+  const srcCard = srcSet && srcSet.cards.find(c => c.term === q.term && c.def === q.answer);
+  if (srcCard) srcCard.misses = (srcCard.misses || 0) + 1;
+  const fb = document.getElementById('fb');
+  fb.textContent = 'Skipped';
+  fb.className = 'feedback';
+  fb.style.color = 'var(--muted)';
+  document.querySelectorAll('.choice').forEach(btn => {
+    btn.disabled = true;
+    if (q.choices[+btn.dataset.idx] === q.answer) btn.classList.add('correct');
+  });
+  const sk = document.getElementById('skip-btn');
+  if (sk) sk.disabled = true;
+  setTimeout(() => {
+    qz.i++;
+    qz.answered = false;
+    if (qz.i >= qz.qs.length) { saveSets(); go('quizResult', { setId: qz.setId }); }
+    else renderQuiz();
+  }, 1400);
 }
 function answerQuiz(idx) {
   if (qz.answered) return;
@@ -662,7 +719,16 @@ function answerQuiz(idx) {
   const q = qz.qs[qz.i];
   const chosen = q.choices[idx];
   const correct = chosen === q.answer;
+  q.chosen = chosen;
+  q.correct = correct;
   if (correct) qz.score++;
+  // Track how often each card is missed (drives weighted quiz selection)
+  const srcSet = getSet(qz.setId);
+  const srcCard = srcSet && srcSet.cards.find(c => c.term === q.term && c.def === q.answer);
+  if (srcCard) {
+    if (correct) srcCard.misses = Math.max(0, (srcCard.misses || 0) - 1);
+    else srcCard.misses = (srcCard.misses || 0) + 1;
+  }
   const fb = document.getElementById('fb');
   fb.textContent = correct ? 'Correct! 🎉' : 'Incorrect';
   fb.className = 'feedback ' + (correct ? 'good' : 'bad');
@@ -675,7 +741,7 @@ function answerQuiz(idx) {
   setTimeout(() => {
     qz.i++;
     qz.answered = false;
-    if (qz.i >= qz.qs.length) go('quizResult', { setId: qz.setId });
+    if (qz.i >= qz.qs.length) { saveSets(); go('quizResult', { setId: qz.setId }); }
     else renderQuiz();
   }, correct ? 900 : 1600);
 }
@@ -684,7 +750,7 @@ function renderQuizResult() {
   if (!s || !qz) return go('home');
   const pct = Math.round((qz.score / qz.qs.length) * 100);
   const msg = pct === 100 ? 'Perfect score! 🏆' : pct >= 70 ? 'Nice work! 💪' : 'Keep practicing — you\'ll get there! 📖';
-  app.innerHTML = `
+  let html = `
     <div class="back" onclick="go('set',{setId:'${s.id}'})">← Back to set</div>
     <div class="result-card">
       <div class="score-ring">${pct}%</div>
@@ -693,7 +759,19 @@ function renderQuizResult() {
         <button class="btn" onclick="startQuiz('${s.id}')">Retake quiz</button>
         <button class="btn secondary" onclick="startFlashcards('${s.id}')">Review flashcards</button>
       </div>
-    </div>`;
+    </div>
+    <div class="section-title" style="margin-top:28px">Answer key</div>`;
+  for (const q of qz.qs) {
+    html += `
+      <div class="term-row" style="border-left:4px solid ${q.correct ? 'var(--green)' : 'var(--red)'}">
+        <div class="term">${q.correct ? '✅' : '❌'} ${esc(q.term)}</div>
+        <div class="def">
+          ${esc(q.answer)}
+          ${q.correct ? '' : `<div style="color:var(--red); margin-top:4px; font-size:13px;">${q.skipped ? 'Skipped' : 'Your answer: ' + esc(q.chosen ?? '—')}</div>`}
+        </div>
+      </div>`;
+  }
+  app.innerHTML = html;
 }
 
 /* ----- Editor ----- */
