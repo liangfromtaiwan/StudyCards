@@ -314,13 +314,20 @@ function loadSets() {
 function saveSets() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) { /* ignore */ }
   if (user && db) {
+    const own = sets.filter(s => !s.shared);
     db.collection('users').doc(user.uid)
-      .set({ sets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+      .set({ sets: own, sharedRefs, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
       .catch(e => toast('Cloud sync failed: ' + e.message));
+    for (const s of sets.filter(s => s.shared)) {
+      db.collection('sharedSets').doc(s.shared)
+        .set({ title: s.title, cards: s.cards, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+        .catch(e => toast('Shared set sync failed: ' + e.message));
+    }
   }
 }
 let sets = loadSets();
 let user = null, db = null;
+let sharedRefs = [];
 saveSets();
 
 /* =====================  State & helpers  ===================== */
@@ -579,16 +586,79 @@ async function loadCloudSets() {
   try {
     const snap = await db.collection('users').doc(user.uid).get();
     const data = snap.exists ? snap.data() : null;
+    sharedRefs = (data && Array.isArray(data.sharedRefs)) ? data.sharedRefs : [];
+    let own;
     if (data && Array.isArray(data.sets)) {
-      sets = data.sets;
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) {}
+      own = data.sets;
     } else {
       // first sign-in on this account: upload whatever is stored locally
-      saveSets();
+      own = sets.filter(s => !s.shared);
     }
+    const shared = [];
+    for (const code of sharedRefs) {
+      try {
+        const d = await db.collection('sharedSets').doc(code).get();
+        if (d.exists) {
+          const sd = d.data();
+          shared.push({ id: 'shared-' + code, shared: code, title: sd.title, cards: sd.cards || [] });
+        }
+      } catch (e) { /* skip unreachable shared set */ }
+    }
+    sets = [...shared, ...own];
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) {}
+    if (!(data && Array.isArray(data.sets))) saveSets();
   } catch (e) {
     toast('Could not load your cloud data: ' + e.message);
   }
+}
+function genCode() {
+  const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no confusing 0/O/1/I/L
+  let c = '';
+  for (let i = 0; i < 8; i++) c += A[Math.floor(Math.random() * A.length)];
+  return c;
+}
+function fmtCode(code) { return code.slice(0, 4) + '-' + code.slice(4); }
+async function shareSet(setId) {
+  if (!user) { toast('Sign in first to share sets'); return; }
+  const s = getSet(setId);
+  if (!s) return;
+  if (s.shared) { showShareCode(s.shared); return; }
+  const code = genCode();
+  try {
+    await db.collection('sharedSets').doc(code).set({
+      title: s.title, cards: s.cards, createdBy: user.uid,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    s.shared = code;
+    s.id = 'shared-' + code;
+    sharedRefs.push(code);
+    saveSets();
+    go('set', { setId: s.id });
+    showShareCode(code);
+  } catch (e) { toast('Could not share: ' + e.message); }
+}
+function showShareCode(code) {
+  const disp = fmtCode(code);
+  if (navigator.clipboard) navigator.clipboard.writeText(disp).catch(() => {});
+  prompt('Share this code with your study partner.\nThey tap "Join set" and enter it:', disp);
+}
+async function joinSet() {
+  if (!user) { toast('Sign in first to join a shared set'); go('login'); return; }
+  let code = prompt('Enter the share code (e.g. K3W9-XQ2P):');
+  if (!code) return;
+  code = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 8) { toast('That code doesn\'t look right'); return; }
+  if (sharedRefs.includes(code)) { toast('You already joined this set'); return; }
+  try {
+    const d = await db.collection('sharedSets').doc(code).get();
+    if (!d.exists) { toast('No set found with that code'); return; }
+    const sd = d.data();
+    sharedRefs.push(code);
+    sets.unshift({ id: 'shared-' + code, shared: code, title: sd.title, cards: sd.cards || [] });
+    saveSets();
+    toast('Joined "' + sd.title + '"');
+    render();
+  } catch (e) { toast('Could not join: ' + e.message); }
 }
 
 /* ----- Home ----- */
@@ -601,6 +671,7 @@ function renderHome() {
       <div class="logo" onclick="go('home')">Study<span>Cards</span></div>
       <div style="display:flex; align-items:center; gap:6px;">
         ${acct}
+        ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="joinSet()">🔗 Join set</button>` : ''}
         <button class="btn small" onclick="openEditor()">＋ New set</button>
       </div>
     </header>
@@ -612,7 +683,7 @@ function renderHome() {
       html += `
         <div class="set-card" onclick="go('set',{setId:'${s.id}'})">
           <h3>${esc(s.title)}</h3>
-          <div class="meta">${s.cards.length} terms</div>
+          <div class="meta">${s.cards.length} terms${s.shared ? ' · 👥 shared' : ''}</div>
         </div>`;
     }
   }
@@ -623,6 +694,19 @@ function renderHome() {
 function renderSet() {
   const s = getSet(state.setId);
   if (!s) return go('home');
+  // Shared set: pull the latest version once per visit so partner edits show up
+  if (s.shared && user && db && !state.refreshed) {
+    state.refreshed = true;
+    db.collection('sharedSets').doc(s.shared).get().then(d => {
+      if (!d.exists) return;
+      const sd = d.data();
+      const changed = JSON.stringify({ t: s.title, c: s.cards }) !== JSON.stringify({ t: sd.title, c: sd.cards || [] });
+      s.title = sd.title;
+      s.cards = sd.cards || [];
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) {}
+      if (changed && state.view === 'set' && state.setId === s.id) renderSet();
+    }).catch(() => {});
+  }
   const canQuiz = s.cards.length >= 2;
   let html = `
     <div class="back" onclick="go('home')">← All sets</div>
@@ -636,9 +720,10 @@ function renderSet() {
         <div class="icon">✍️</div><div class="label">Quiz</div><div class="desc">Multiple choice test</div>
       </div>
     </div>
-    <div style="display:flex; gap:10px; margin-bottom:24px;">
+    <div style="display:flex; gap:10px; margin-bottom:24px; flex-wrap:wrap;">
       <button class="btn secondary small" onclick="openEditor('${s.id}')">✎ Edit set</button>
-      <button class="btn danger small" onclick="deleteSet('${s.id}')">🗑 Delete</button>
+      ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="shareSet('${s.id}')">${s.shared ? '👥 ' + fmtCode(s.shared) : '🔗 Share'}</button>` : ''}
+      <button class="btn danger small" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
     </div>
     <div class="section-title">Terms in this set</div>`;
   s.cards.forEach((c, i) => {
@@ -675,6 +760,16 @@ function saveCardRow(setId, i) {
 }
 
 function deleteSet(id) {
+  const s = getSet(id);
+  if (s && s.shared) {
+    if (!confirm('Leave this shared set? Your study partner will keep it.')) return;
+    sharedRefs = sharedRefs.filter(c => c !== s.shared);
+    sets = sets.filter(x => x.id !== id);
+    saveSets();
+    toast('Left shared set');
+    go('home');
+    return;
+  }
   if (!confirm('Delete this set? This cannot be undone.')) return;
   sets = sets.filter(s => s.id !== id);
   saveSets();
@@ -1018,6 +1113,7 @@ if (FIREBASE_ENABLED) {
       toast('Signed in as ' + u.email);
     } else {
       sets = loadSets();
+      sharedRefs = [];
       if (wasSignedIn) { toast('Signed out'); go('login'); }
       else render();
     }
