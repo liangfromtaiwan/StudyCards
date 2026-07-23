@@ -192,6 +192,35 @@
   .editor-actions { display:flex; gap:12px; margin-top:20px; }
   .editor-actions .btn { flex:1; }
 
+  /* ---------- Inline card edit ---------- */
+  .icon-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 16px; padding: 4px 6px; border-radius: 8px;
+    color: var(--muted); line-height: 1; flex-shrink: 0;
+    transition: transform .1s, background .15s, color .15s;
+  }
+  .icon-btn:hover { background: #eef0ff; color: var(--primary); }
+  .icon-btn:active { transform: scale(.9); }
+  .icon-btn.save { color: var(--green); font-weight: 800; }
+  .term-row.editing { gap: 8px; }
+  .term-row.editing input { flex: 1; min-width: 0; padding: 9px 10px; font-size: 14px; }
+
+  /* ---------- Example sentence ---------- */
+  .ex-row { display: flex; gap: 8px; margin-top: 10px; }
+  .ex-row input { flex: 1; min-width: 0; font-size: 14px; padding: 10px 12px; }
+  .ex-row .suggest { flex-shrink: 0; padding: 0 14px; }
+  .fc-example {
+    font-size: 16px; font-weight: 400; font-style: italic;
+    color: var(--muted); margin-top: 14px; line-height: 1.5;
+  }
+  .flip-face .fc-example .speak-btn { position: static; font-size: 15px; padding: 2px 4px; }
+  .def-example { font-size: 12px; font-style: italic; margin-top: 4px; color: var(--muted); }
+
+  /* ---------- Spelling hint ---------- */
+  .spell-hint { font-size: 13px; color: var(--muted); margin-top: 8px; min-height: 0; }
+  .spell-hint a { color: var(--primary); font-weight: 700; cursor: pointer; }
+  .spell-hint a:hover { text-decoration: underline; }
+
   /* ---------- Speaker button ---------- */
   .speak-btn {
     background: none; border: none; cursor: pointer;
@@ -397,11 +426,39 @@ async function translateEn2Zh(text) {
   return out2.trim();
 }
 
+/* Spelling check via Datamuse (free, no key) */
+async function checkSpelling(termInput, i, text) {
+  const hint = termInput.closest('.card-edit') && termInput.closest('.card-edit').querySelector('[data-hint]');
+  if (!hint) return;
+  hint.innerHTML = '';
+  if (!/^[A-Za-z]+$/.test(text) || text.length < 3) return; // single words only
+  try {
+    const r = await fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(text) + '&max=1');
+    const j = await r.json();
+    const best = j[0] && j[0].word;
+    if (best && best.toLowerCase() !== text.toLowerCase() && termInput.value.trim() === text) {
+      hint.innerHTML = `⚠️ Did you mean <a onclick="applySpell(this, ${i})" data-w="${esc(best)}">${esc(best)}</a>?`;
+    }
+  } catch (e) { /* offline — browser spellcheck still works */ }
+}
+function applySpell(el, i) {
+  const w = el.dataset.w;
+  const cardEl = el.closest('.card-edit');
+  const termInput = cardEl.querySelector('input');
+  termInput.value = w;
+  if (ed && ed.cards[i]) ed.cards[i].term = w;
+  cardEl.querySelector('[data-hint]').innerHTML = '';
+  const defInput = termInput.nextElementSibling;
+  if (defInput && defInput.dataset.manual !== '1') { defInput.value = ''; if (ed && ed.cards[i]) ed.cards[i].def = ''; }
+  autoTranslate(termInput, i); // re-translate the corrected word
+}
+
 function autoTranslate(termInput, i) {
   clearTimeout(termInput._t);
   const text = termInput.value.trim();
   if (!text || !/[a-zA-Z]/.test(text)) return;
   termInput._t = setTimeout(async () => {
+    checkSpelling(termInput, i, text);
     const defInput = termInput.nextElementSibling;
     if (!defInput) return;
     // don't overwrite a definition the user typed themselves
@@ -490,8 +547,8 @@ async function doGoogleAuth() {
     await firebase.auth().signInWithPopup(provider);
     // onAuthStateChanged takes over from here
   } catch (e) {
-    if (e.code === 'auth/popup-blocked') {
-      try { await firebase.auth().signInWithRedirect(new firebase.auth.GoogleAuthProvider()); } catch (e2) { toast(e2.message); }
+    if (e.code === 'auth/popup-blocked' || /missing initial state/i.test(e.message || '')) {
+      toast('Google sign-in doesn\'t work in in-app browsers (Telegram, LINE, FB…) — open this page in Safari or Chrome, or sign in with email instead');
     } else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
       toast(e.message);
     }
@@ -574,10 +631,37 @@ function renderSet() {
       <button class="btn danger small" onclick="deleteSet('${s.id}')">🗑 Delete</button>
     </div>
     <div class="section-title">Terms in this set</div>`;
-  for (const c of s.cards) {
-    html += `<div class="term-row"><div class="term">${esc(c.term)}</div><div class="def">${esc(c.def)}</div>${speakBtn(c.term)}</div>`;
-  }
+  s.cards.forEach((c, i) => {
+    if (state.editIdx === i) {
+      html += `
+        <div class="term-row editing">
+          <input type="text" id="row-term" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" placeholder="Term">
+          <input type="text" id="row-def" value="${esc(c.def)}" placeholder="Definition">
+          <button class="icon-btn save" title="Save" onclick="saveCardRow('${s.id}', ${i})">✓</button>
+          <button class="icon-btn" title="Cancel" onclick="go('set',{setId:'${s.id}'})">✕</button>
+        </div>`;
+    } else {
+      html += `
+        <div class="term-row">
+          <div class="term">${esc(c.term)}</div><div class="def">${esc(c.def)}${c.example ? `<div class="def-example">${esc(c.example)}</div>` : ''}</div>
+          <button class="icon-btn" title="Edit this card" onclick="go('set',{setId:'${s.id}',editIdx:${i}})">✏️</button>
+          ${speakBtn(c.term)}
+        </div>`;
+    }
+  });
   app.innerHTML = html;
+  if (typeof state.editIdx === 'number') { const el = document.getElementById('row-term'); if (el) el.focus(); }
+}
+function saveCardRow(setId, i) {
+  const s = getSet(setId);
+  if (!s || !s.cards[i]) return;
+  const term = document.getElementById('row-term').value.trim();
+  const def = document.getElementById('row-def').value.trim();
+  if (!term || !def) { toast('Term and definition cannot be empty'); return; }
+  s.cards[i] = { ...s.cards[i], term, def };
+  saveSets();
+  toast('Card updated');
+  go('set', { setId });
 }
 
 function deleteSet(id) {
@@ -609,7 +693,7 @@ function renderFlashcards() {
     <div class="flip-scene">
       <div class="flip-card ${fc.flipped ? 'flipped' : ''}" onclick="flipFc()">
         <div class="flip-face"><div class="hint">Term</div>${speakBtn(card.term)}${esc(card.term)}</div>
-        <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def)}${esc(card.def)}</div>
+        <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def)}<div>${esc(card.def)}${card.example ? `<div class="fc-example">${esc(card.example)} ${speakBtn(card.example)}</div>` : ''}</div></div>
       </div>
     </div>
     <div class="fc-controls">
@@ -653,7 +737,7 @@ function startQuiz(setId) {
   if (!s || s.cards.length < 2) { toast('Add at least 2 cards to take a quiz'); return; }
   const qs = weightedSample(s.cards, QUIZ_MAX).map(card => {
     const wrongPool = shuffle(s.cards.filter(c => c.def !== card.def)).slice(0, 3).map(c => c.def);
-    return { term: card.term, answer: card.def, choices: shuffle([card.answer ?? card.def, ...wrongPool]) };
+    return { term: card.term, answer: card.def, example: card.example, choices: shuffle([card.answer ?? card.def, ...wrongPool]) };
   });
   qz = { setId, qs, i: 0, score: 0, answered: false };
   go('quiz', { setId });
@@ -767,6 +851,7 @@ function renderQuizResult() {
         <div class="term">${q.correct ? '✅' : '❌'} ${esc(q.term)}</div>
         <div class="def">
           ${esc(q.answer)}
+          ${q.example ? `<div class="def-example">${esc(q.example)}</div>` : ''}
           ${q.correct ? '' : `<div style="color:var(--red); margin-top:4px; font-size:13px;">${q.skipped ? 'Skipped' : 'Your answer: ' + esc(q.chosen ?? '—')}</div>`}
         </div>
       </div>`;
@@ -796,17 +881,7 @@ function renderEditor() {
     </div>
     <div class="section-title">Cards</div>
     <div id="ed-cards">`;
-  ed.cards.forEach((c, i) => {
-    html += `
-      <div class="card-edit">
-        <button class="remove" title="Remove card" onclick="removeCard(${i})">✕</button>
-        <div class="num">CARD ${i + 1}</div>
-        <div class="pair">
-          <input type="text" placeholder="Term (English)" value="${esc(c.term)}" oninput="ed.cards[${i}].term=this.value; autoTranslate(this, ${i})">
-          <input type="text" placeholder="Definition" value="${esc(c.def)}" oninput="ed.cards[${i}].def=this.value; this.dataset.manual=this.value.trim()?'1':''">
-        </div>
-      </div>`;
-  });
+  ed.cards.forEach((c, i) => { html += cardEditHTML(c, i); });
   html += `</div>
     <button class="btn secondary full" onclick="addCard()">＋ Add card</button>
     <div class="editor-actions">
@@ -815,12 +890,80 @@ function renderEditor() {
     </div>`;
   app.innerHTML = html;
 }
+function cardEditHTML(c, i) {
+  return `
+      <div class="card-edit">
+        <button class="remove" title="Remove card" onclick="removeCard(${i})">✕</button>
+        <div class="num">CARD ${i + 1}</div>
+        <div class="pair">
+          <input type="text" placeholder="Term (English)" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" oninput="ed.cards[${i}].term=this.value; autoTranslate(this, ${i}); ensureTrailingBlank(${i})">
+          <input type="text" placeholder="Definition" value="${esc(c.def)}" oninput="ed.cards[${i}].def=this.value; this.dataset.manual=this.value.trim()?'1':''; ensureTrailingBlank(${i})">
+        </div>
+        <div class="ex-row">
+          <input type="text" placeholder="Example sentence (optional)" spellcheck="true" value="${esc(c.example || '')}" oninput="ed.cards[${i}].example=this.value; ensureTrailingBlank(${i})">
+          <button class="btn secondary small suggest" title="Suggest an example from the dictionary" onclick="suggestExample(this, ${i})">✨</button>
+        </div>
+        <div class="spell-hint" data-hint></div>
+      </div>`;
+}
+async function suggestExample(btn, i) {
+  if (!ed || !ed.cards[i]) return;
+  const term = (ed.cards[i].term || '').trim();
+  if (!term) { toast('Type the English term first'); return; }
+  btn.disabled = true; btn.textContent = '…';
+  const lookups = [term.toLowerCase()];
+  if (term.includes(' ')) {
+    const longest = term.split(/\s+/).sort((a, b) => b.length - a.length)[0];
+    lookups.push(longest.toLowerCase());
+  }
+  let ex = null;
+  for (const w of lookups) {
+    try {
+      const r = await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(w));
+      if (!r.ok) continue;
+      const j = await r.json();
+      outer: for (const entry of (Array.isArray(j) ? j : [])) {
+        for (const m of entry.meanings || []) {
+          for (const d of m.definitions || []) {
+            if (d.example) { ex = d.example; break outer; }
+          }
+        }
+      }
+      if (ex) break;
+    } catch (e) { /* try next */ }
+  }
+  btn.disabled = false; btn.textContent = '✨';
+  if (ex) {
+    const input = btn.previousElementSibling;
+    input.value = ex;
+    ed.cards[i].example = ex;
+    ensureTrailingBlank(i);
+  } else {
+    toast('No example found for this word — try writing your own');
+  }
+}
+// When the user starts typing in the LAST card, append a fresh blank card automatically
+function ensureTrailingBlank(i) {
+  if (!ed || i !== ed.cards.length - 1) return;
+  const last = ed.cards[i];
+  if (!String(last.term || '').trim() && !String(last.def || '').trim() && !String(last.example || '').trim()) return;
+  ed.cards.push({ term: '', def: '' });
+  const wrap = document.getElementById('ed-cards');
+  if (wrap) wrap.insertAdjacentHTML('beforeend', cardEditHTML(ed.cards[ed.cards.length - 1], ed.cards.length - 1));
+}
 function addCard() { ed.cards.push({ term: '', def: '' }); renderEditor(); window.scrollTo(0, document.body.scrollHeight); }
 function removeCard(i) { ed.cards.splice(i, 1); if (!ed.cards.length) ed.cards.push({ term: '', def: '' }); renderEditor(); }
 function cancelEdit() { const back = ed && ed.id ? { view: 'set', setId: ed.id } : { view: 'home' }; ed = null; go(back.view, back); }
 function saveEdit() {
   const title = ed.title.trim();
-  const cards = ed.cards.map(c => ({ term: c.term.trim(), def: c.def.trim() })).filter(c => c.term && c.def);
+  const cards = ed.cards
+    .map(c => {
+      const card = { term: (c.term || '').trim(), def: (c.def || '').trim() };
+      if ((c.example || '').trim()) card.example = c.example.trim();
+      if (c.misses) card.misses = c.misses;
+      return card;
+    })
+    .filter(c => c.term && c.def);
   if (!title) { toast('Please enter a title'); return; }
   if (!cards.length) { toast('Add at least one complete card'); return; }
   if (ed.id) {
