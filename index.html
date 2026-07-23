@@ -37,8 +37,9 @@
   /* ---------- Header ---------- */
   header {
     display:flex; align-items:center; justify-content:space-between;
-    margin-bottom: 20px;
+    margin-bottom: 20px; flex-wrap: wrap; gap: 10px;
   }
+  header > div:last-child { flex-wrap: wrap; }
   .logo { font-size: 22px; font-weight: 800; color: var(--primary); letter-spacing:-.5px; cursor:pointer; }
   .logo span { color: var(--text); }
 
