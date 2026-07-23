@@ -85,7 +85,9 @@
   }
   .dot-menu button:hover { background: #f2f4fb; }
   .dot-menu button.danger { color: var(--red); }
-  .set-card:hover { border-color: var(--primary); }
+  @media (hover: hover) and (pointer: fine) {
+    .set-card:hover { border-color: var(--primary); }
+  }
   .set-card h3 { font-size: 17px; margin-bottom: 4px; }
   .set-card .meta { font-size: 13px; color: var(--muted); }
   .empty-state { text-align:center; padding: 60px 20px; color: var(--muted); }
@@ -101,7 +103,9 @@
     padding: 18px 16px; cursor:pointer; border:1.5px solid transparent;
     display:flex; flex-direction:column; gap:6px; transition: border-color .15s;
   }
-  .mode-btn:hover { border-color: var(--primary); }
+  @media (hover: hover) and (pointer: fine) {
+    .mode-btn:hover { border-color: var(--primary); }
+  }
   .mode-btn .icon { font-size: 24px; }
   .mode-btn .label { font-weight: 700; font-size: 15px; }
   .mode-btn .desc { font-size: 12px; color: var(--muted); }
@@ -158,7 +162,9 @@
     padding: 16px; font-size: 16px; font-weight:500; color: var(--text);
     margin-bottom: 10px; cursor:pointer; transition: border-color .15s, background .15s;
   }
-  .choice:hover { border-color: var(--primary); }
+  @media (hover: hover) and (pointer: fine) {
+    .choice:hover { border-color: var(--primary); }
+  }
   .choice.correct { border-color: var(--green); background: #e9f9f1; font-weight:700; }
   .choice.wrong { border-color: var(--red); background: #ffeef0; }
   .choice:disabled { cursor:default; }
