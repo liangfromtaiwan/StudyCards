@@ -387,6 +387,16 @@ function speak(text, btn) {
   const isZh = /[㐀-䶿一-鿿豈-﫿]/.test(text);
   if (btn) btn.classList.add('speaking');
   const done = () => { if (btn) btn.classList.remove('speaking'); };
+  // Single English words: play real human recordings (Google Dictionary / Oxford) when available
+  const word = text.trim().toLowerCase();
+  if (!isZh && /^[a-z]+(?:[-'][a-z]+)?$/.test(word)) {
+    const a = new Audio('https://ssl.gstatic.com/dictionary/static/sounds/oxford/' + encodeURIComponent(word) + '--_us_1.mp3');
+    ttsAudio = a;
+    a.onended = done;
+    a.onerror = () => { ttsAudio = null; speakFallback(text, isZh, done); };
+    a.play().catch(() => { ttsAudio = null; speakFallback(text, isZh, done); });
+    return;
+  }
   speakFallback(text, isZh, done);
 }
 function speakFallback(text, isZh, done) {
