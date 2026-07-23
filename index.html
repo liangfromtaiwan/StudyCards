@@ -63,7 +63,27 @@
     background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
     padding: 18px; margin-bottom: 12px; cursor:pointer;
     border: 1.5px solid transparent; transition: border-color .15s;
+    position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   }
+  .dot-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 22px; font-weight: 700; color: var(--muted);
+    padding: 4px 12px; border-radius: 8px; line-height: 1; flex-shrink: 0;
+  }
+  .dot-btn:hover { background: #eef0ff; color: var(--primary); }
+  .dot-menu {
+    position: absolute; right: 14px; top: 58px; z-index: 20;
+    background: var(--card); border: 1.5px solid var(--border); border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(40,46,62,.18); min-width: 160px; overflow: hidden; display: none;
+  }
+  .dot-menu.open { display: block; }
+  .dot-menu button {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; padding: 12px 16px;
+    font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer;
+  }
+  .dot-menu button:hover { background: #f2f4fb; }
+  .dot-menu button.danger { color: var(--red); }
   .set-card:hover { border-color: var(--primary); }
   .set-card h3 { font-size: 17px; margin-bottom: 4px; }
   .set-card .meta { font-size: 13px; color: var(--muted); }
@@ -682,8 +702,16 @@ function renderHome() {
     for (const s of sets) {
       html += `
         <div class="set-card" onclick="go('set',{setId:'${s.id}'})">
-          <h3>${esc(s.title)}</h3>
-          <div class="meta">${s.cards.length} terms${s.shared ? ' · 👥 shared' : ''}</div>
+          <div>
+            <h3>${esc(s.title)}</h3>
+            <div class="meta">${s.cards.length} terms${s.shared ? ' · 👥 shared' : ''}</div>
+          </div>
+          <button class="dot-btn" title="More options" onclick="event.stopPropagation(); toggleDotMenu('${s.id}')">⋮</button>
+          <div class="dot-menu" id="menu-${s.id}" onclick="event.stopPropagation()">
+            <button onclick="openEditor('${s.id}')">✎ Edit</button>
+            ${FIREBASE_ENABLED ? `<button onclick="shareSet('${s.id}')">🔗 Share</button>` : ''}
+            <button class="danger" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
+          </div>
         </div>`;
     }
   }
@@ -758,6 +786,17 @@ function saveCardRow(setId, i) {
   toast('Card updated');
   go('set', { setId });
 }
+
+function toggleDotMenu(id) {
+  const menu = document.getElementById('menu-' + id);
+  if (!menu) return;
+  const wasOpen = menu.classList.contains('open');
+  document.querySelectorAll('.dot-menu.open').forEach(m => m.classList.remove('open'));
+  if (!wasOpen) menu.classList.add('open');
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('.dot-menu.open').forEach(m => m.classList.remove('open'));
+});
 
 function deleteSet(id) {
   const s = getSet(id);
