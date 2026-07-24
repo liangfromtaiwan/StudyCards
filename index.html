@@ -112,8 +112,20 @@
   .term-row {
     background: var(--card); border-radius: 12px; box-shadow: var(--shadow);
     padding: 14px 16px; margin-bottom: 10px;
-    display:flex; align-items:center; gap:14px;
+    display:flex; align-items:center; gap:14px; flex-wrap: wrap;
   }
+  .row-example {
+    flex-basis: 100%; font-size: 13px; font-style: italic; color: var(--muted);
+    margin-top: 0; padding-top: 4px; line-height: 1.5;
+  }
+  .ex-toggle {
+    flex-basis: 100%; background: none; border: none;
+    border-top: 1.5px solid var(--border);
+    margin-top: 10px; padding: 9px 0 0;
+    color: var(--muted); font-size: 13px; font-weight: 700;
+    cursor: pointer; font-family: inherit; text-align: center;
+  }
+  .ex-toggle.ex-open { color: var(--primary); }
   .term-row .term { font-weight: 700; flex: 0 0 38%; word-break: break-word; }
   .term-row .def { color: var(--muted); font-size: 14px; flex:1; word-break: break-word; border-left: 2px solid var(--border); padding-left: 14px; }
 
@@ -199,6 +211,15 @@
   .auth-links a { color: var(--primary); font-size: 14px; font-weight: 600; cursor: pointer; }
   .auth-links a:hover { text-decoration: underline; }
   .sync-badge { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .lang-select {
+    width: 100%; margin-top: 4px;
+    border: 1.5px solid var(--border); border-radius: 12px;
+    color: var(--text); font-size: 15px; font-weight: 600;
+    padding: 12px 40px 12px 14px;
+    outline: none; cursor: pointer; font-family: inherit;
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    background: var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23646f90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 16px center;
+  }
   .auth-divider {
     display: flex; align-items: center; gap: 12px; margin: 16px 0;
     color: var(--muted); font-size: 13px; font-weight: 600;
@@ -229,8 +250,11 @@
   .icon-btn:hover { background: #eef0ff; color: var(--primary); }
   .icon-btn:active { transform: scale(.9); }
   .icon-btn.save { color: var(--green); font-weight: 800; }
-  .term-row.editing { gap: 8px; }
-  .term-row.editing input { flex: 1; min-width: 0; padding: 9px 10px; font-size: 14px; }
+  .term-row.editing { gap: 8px; align-items: flex-start; }
+  .term-row.editing input { min-width: 0; padding: 9px 10px; font-size: 14px; width: 100%; }
+  .edit-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .edit-line { display: flex; gap: 8px; }
+  .edit-line input { flex: 1; }
 
   /* ---------- Example sentence ---------- */
   .ex-row { display: flex; gap: 8px; margin-top: 10px; }
@@ -240,8 +264,34 @@
     font-size: 16px; font-weight: 400; font-style: italic;
     color: var(--muted); margin-top: 14px; line-height: 1.5;
   }
-  .flip-face .fc-example .speak-btn { position: static; font-size: 15px; padding: 2px 4px; }
+  .flip-face .fc-example .speak-btn {
+    position: static; font-size: 16px;
+    min-width: 44px; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    vertical-align: middle; margin: -12px 0;
+  }
   .def-example { font-size: 12px; font-style: italic; margin-top: 4px; color: var(--muted); }
+
+  /* ---------- Search / filter / sort toolbar ---------- */
+  .term-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+  .term-toolbar input { flex: 1; min-width: 0; padding: 11px 14px; font-size: 15px; }
+  .term-toolbar select {
+    border: 1.5px solid var(--border); border-radius: 12px;
+    color: var(--text); font-size: 14px; font-weight: 600;
+    padding: 0 40px 0 14px;
+    outline: none; cursor: pointer; font-family: inherit;
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    background: var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23646f90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 16px center;
+  }
+  .chips { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .chip {
+    border: 1.5px solid var(--border); background: var(--card); color: var(--muted);
+    font-size: 13px; font-weight: 700; padding: 7px 14px; border-radius: 999px;
+    cursor: pointer; transition: all .15s;
+  }
+  .chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .empty-list { text-align: center; color: var(--muted); padding: 28px 12px; font-size: 15px; }
+  .empty-list .btn { margin-top: 12px; }
 
   /* ---------- Spelling hint ---------- */
   .spell-hint { font-size: 13px; color: var(--muted); margin-top: 8px; min-height: 0; }
@@ -260,9 +310,45 @@
   .speak-btn.speaking { animation: pulse .8s ease infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   .flip-face .speak-btn {
-    position: absolute; top: 12px; right: 14px; font-size: 22px; z-index: 2;
+    position: absolute; top: 4px; right: 4px; font-size: 22px; z-index: 2;
+    min-width: 52px; min-height: 52px;
+    display: inline-flex; align-items: center; justify-content: center;
   }
   .qtext-row { display: flex; align-items: center; gap: 10px; }
+
+  /* ---------- Navbar ---------- */
+  #navbar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+    background: var(--card); border-top: 1.5px solid var(--border);
+    display: flex; padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -2px 12px rgba(40,46,62,.06);
+  }
+  .nav-item {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 10px 0 8px; background: none; border: none; cursor: pointer;
+    color: var(--muted); font-size: 11px; font-weight: 700; font-family: inherit;
+  }
+  .nav-item .nicon { font-size: 22px; line-height: 1; }
+  .nav-item.active { color: var(--primary); }
+  .nav-left, .nav-cta { display: none; }
+  .nav-tabs { display: flex; flex: 1; }
+  @media (min-width: 700px) {
+    #navbar {
+      top: 0; bottom: auto; border-top: none;
+      border-bottom: 1.5px solid var(--border);
+      align-items: center; justify-content: space-between;
+      gap: 16px; padding: 0 28px;
+      box-shadow: 0 2px 12px rgba(40,46,62,.06);
+      padding-bottom: 0;
+    }
+    .nav-left { display: flex; align-items: center; gap: 10px; }
+    .nav-cta { display: block; }
+    .nav-tabs { flex: 0 0 auto; gap: 8px; }
+    .nav-item { flex: 0 0 auto; flex-direction: row; gap: 8px; font-size: 14px; padding: 16px 12px; }
+    .nav-item .nicon { font-size: 18px; }
+    body.nav-visible #app { padding-top: 84px; }
+    body.nav-visible header { display: none; }
+  }
 
   /* ---------- Toast ---------- */
   #toast {
@@ -276,6 +362,7 @@
 </head>
 <body>
 <div id="app"></div>
+<nav id="navbar"></nav>
 <div id="toast"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -355,6 +442,20 @@ function saveSets() {
 let sets = loadSets();
 let user = null, db = null;
 let sharedRefs = [];
+/* ----- Native language (translation target) ----- */
+const LANGS = [
+  ['zh-TW', '繁體中文'], ['zh-CN', '简体中文'], ['ja', '日本語'], ['ko', '한국어'],
+  ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'],
+  ['vi', 'Tiếng Việt'], ['th', 'ไทย'], ['id', 'Bahasa Indonesia']
+];
+let APP_LANG = 'zh-TW';
+try { APP_LANG = localStorage.getItem('studycards.lang') || 'zh-TW'; } catch (e) {}
+function setAppLang(l) {
+  APP_LANG = l;
+  try { localStorage.setItem('studycards.lang', l); } catch (e) {}
+  if (user && db) db.collection('users').doc(user.uid).set({ lang: l }, { merge: true }).catch(() => {});
+  toast('Translation language updated');
+}
 saveSets();
 
 /* =====================  State & helpers  ===================== */
@@ -381,80 +482,108 @@ if ('speechSynthesis' in window) {
   loadVoices();
   speechSynthesis.onvoiceschanged = loadVoices;
 }
-function pickVoice(isZh) {
+function pickVoice(lang) {
   const norm = v => (v.lang || '').replace('_', '-').toLowerCase();
-  const langMatch = isZh
-    ? (v => norm(v).startsWith('zh'))
-    : (v => norm(v).startsWith('en'));
-  const pool = voicesReady.filter(langMatch);
+  const want = lang.toLowerCase();
+  const base = want.split('-')[0];
+  const pool = voicesReady.filter(v => norm(v).startsWith(base));
   // 1) Downloaded high-quality local voices (macOS/Windows premium & enhanced)
   const premium = pool.find(v => v.localService && /Premium|Enhanced|Natural/i.test(v.name));
   if (premium) return premium;
-  // 2) Known-good local voices (network voices can be silently broken in Chrome)
-  const localPrefer = isZh
-    ? ['美佳', 'Mei-Jia', 'Meijia', 'HsiaoChen', 'Yating', 'Hanhan', '婷婷', 'Tingting']
-    : ['Samantha', 'Microsoft Aria', 'Microsoft Zira', 'Daniel', 'Karen', 'Moira'];
+  // 2) Known-good local voices per language (network voices can be silently broken in Chrome)
+  const localPrefer = ({
+    zh: ['美佳', 'Mei-Jia', 'Meijia', 'HsiaoChen', 'Yating', 'Hanhan', '婷婷', 'Tingting'],
+    en: ['Samantha', 'Microsoft Aria', 'Microsoft Zira', 'Daniel', 'Karen', 'Moira'],
+    ja: ['Kyoko', 'Otoya', 'Hattori'],
+    ko: ['Yuna', 'Sora'],
+    es: ['Mónica', 'Monica', 'Paulina'],
+    fr: ['Amélie', 'Amelie', 'Thomas'],
+    de: ['Anna', 'Petra'],
+  })[base] || [];
   for (const name of localPrefer) {
     const v = pool.find(v => v.localService && v.name.includes(name));
     if (v) return v;
   }
-  // 3) Any local voice with the right accent
-  const anyLocal = pool.find(v => v.localService && (isZh ? norm(v) === 'zh-tw' : norm(v) === 'en-us'))
+  // 3) Any local voice with the right accent (exact locale first)
+  const anyLocal = pool.find(v => v.localService && norm(v) === want)
     || pool.find(v => v.localService);
   if (anyLocal) return anyLocal;
-  // 4) Last resort: network voices (e.g. Google US English)
-  const netPrefer = isZh ? ['Google 國語'] : ['Google US English'];
-  for (const name of netPrefer) {
-    const v = pool.find(v => v.name.includes(name));
-    if (v) return v;
-  }
-  return pool[0] || null;
+  // 4) Last resort: network voices (e.g. Google voices in Chrome)
+  return pool.find(v => norm(v) === want) || pool[0] || null;
 }
 let ttsAudio = null;
+let speakSeq = 0; // increments on every new speak; stale async chains check it and abort
 function stopSpeaking() {
+  speakSeq++;
   if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   document.querySelectorAll('.speak-btn.speaking').forEach(b => b.classList.remove('speaking'));
 }
-function speak(text, btn) {
+function speak(text, btn, lang) {
   stopSpeaking();
   const isZh = /[㐀-䶿一-鿿豈-﫿]/.test(text);
+  if (!lang) {
+    if (/[぀-ヿ]/.test(text)) lang = 'ja';                  // kana → Japanese
+    else if (/[가-힯]/.test(text)) lang = 'ko';             // hangul → Korean
+    else if (isZh) lang = /^(zh|ja)/.test(APP_LANG) ? APP_LANG : 'zh-TW'; // han → user language
+    else lang = 'en-US';
+  }
   if (btn) btn.classList.add('speaking');
   const done = () => { if (btn) btn.classList.remove('speaking'); };
-  // Single English words: play real human recordings (Google Dictionary / Oxford) when available
+  // Single English words: play real human recordings (Google Dictionary / Oxford) when available.
+  // Try the US recording first, then the UK one, before falling back to device TTS.
   const word = text.trim().toLowerCase();
-  if (!isZh && /^[a-z]+(?:[-'][a-z]+)?$/.test(word)) {
-    const a = new Audio('https://ssl.gstatic.com/dictionary/static/sounds/oxford/' + encodeURIComponent(word) + '--_us_1.mp3');
-    ttsAudio = a;
-    a.onended = done;
-    a.onerror = () => { ttsAudio = null; speakFallback(text, isZh, done); };
-    a.play().catch(() => { ttsAudio = null; speakFallback(text, isZh, done); });
+  const seq = speakSeq;
+  const alive = () => seq === speakSeq;
+  if (lang === 'en-US' && /^[a-z]+(?:[-'][a-z]+)?$/.test(word)) {
+    const base = 'https://ssl.gstatic.com/dictionary/static/sounds/oxford/' + encodeURIComponent(word);
+    playFirstAvailable([base + '--_us_1.mp3', base + '--_gb_1.mp3'], done, () => speakFallback(text, lang, done, alive), alive);
     return;
   }
-  speakFallback(text, isZh, done);
+  speakFallback(text, lang, done, alive);
 }
-function speakFallback(text, isZh, done) {
+function playFirstAvailable(urls, done, fallback, alive = () => true) {
+  if (!alive()) return;
+  if (!urls.length) { fallback(); return; }
+  const a = new Audio(urls[0]);
+  a.volume = 1;
+  ttsAudio = a;
+  let handled = false; // error + rejected play() can both fire — only react once
+  const next = () => {
+    if (handled) return;
+    handled = true;
+    ttsAudio = null;
+    playFirstAvailable(urls.slice(1), done, fallback, alive);
+  };
+  a.onended = () => { if (!handled) { handled = true; done(); } };
+  a.onerror = next;
+  a.play().catch(next);
+}
+function speakFallback(text, lang, done, alive = () => true) {
+  if (!alive()) return;
   if (!('speechSynthesis' in window)) { done(); toast('Speech is not supported in this browser'); return; }
   if (!voicesReady.length) loadVoices(); // voices may load lazily
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = isZh ? 'zh-TW' : 'en-US';
-  u.rate = 0.95;
-  const v = pickVoice(isZh);
+  u.lang = lang;
+  u.volume = 1;   // max loudness to narrow the gap vs. human recordings
+  u.rate = 0.9;   // slightly slower for clearer articulation
+  u.pitch = 1;
+  const v = pickVoice(lang);
   if (v) u.voice = v;
   u.onend = u.onerror = done;
   // small delay avoids a Chrome bug where speak() right after cancel() is silently dropped
-  setTimeout(() => speechSynthesis.speak(u), 60);
+  setTimeout(() => { if (alive()) speechSynthesis.speak(u); else done(); }, 60);
 }
-function speakBtn(text, extraClass = '') {
-  return `<button class="speak-btn ${extraClass}" title="Listen" onclick="event.stopPropagation(); speak(this.dataset.t, this)" data-t="${esc(text)}">🔊</button>`;
+function speakBtn(text, lang = '') {
+  return `<button class="speak-btn" title="Listen" onclick="event.stopPropagation(); speak(this.dataset.t, this, this.dataset.l || undefined)" data-t="${esc(text)}" data-l="${esc(lang)}">🔊</button>`;
 }
 
 /* =====================  Auto-translate (EN → 繁體中文)  ===================== */
-async function translateEn2Zh(text) {
+async function translateEn2Zh(text) { // translates to the user's chosen language (APP_LANG)
   // Primary: Google Translate public endpoint
   try {
-    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=' + encodeURIComponent(text);
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=' + encodeURIComponent(APP_LANG) + '&dt=t&q=' + encodeURIComponent(text);
     const r = await fetch(url);
     if (r.ok) {
       const j = await r.json();
@@ -463,7 +592,7 @@ async function translateEn2Zh(text) {
     }
   } catch (e) { /* fall through */ }
   // Fallback: MyMemory
-  const r2 = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|zh-TW');
+  const r2 = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|' + encodeURIComponent(APP_LANG));
   const j2 = await r2.json();
   const out2 = j2 && j2.responseData && j2.responseData.translatedText;
   if (!out2) throw new Error('no translation');
@@ -530,11 +659,66 @@ function render() {
   const v = state.view;
   if (v === 'login') renderLogin();
   else if (v === 'home') renderHome();
+  else if (v === 'account') renderAccount();
   else if (v === 'set') renderSet();
   else if (v === 'flashcards') renderFlashcards();
   else if (v === 'quiz') renderQuiz();
   else if (v === 'quizResult') renderQuizResult();
   else if (v === 'edit') renderEditor();
+  renderNav();
+}
+/* ----- Navbar ----- */
+function renderNav() {
+  const nav = document.getElementById('navbar');
+  if (!nav) return;
+  const visible = ['home', 'set', 'account', 'quizResult'].includes(state.view);
+  document.body.classList.toggle('nav-visible', visible);
+  nav.style.display = visible ? '' : 'none';
+  if (!visible) return;
+  const active = state.view === 'account' ? 'account' : 'sets';
+  nav.innerHTML = `
+    <div class="nav-left">
+      <div class="logo" onclick="go('home')">Study<span>Cards</span></div>
+      ${FIREBASE_ENABLED && user ? `<span class="sync-badge" title="${esc(user.email)}">☁️ Synced</span>` : ''}
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-item ${active === 'sets' ? 'active' : ''}" onclick="go('home')"><span class="nicon">📚</span>Sets</button>
+      <button class="nav-item" onclick="openEditor()"><span class="nicon">➕</span>Create</button>
+      <button class="nav-item ${active === 'account' ? 'active' : ''}" onclick="go('account')"><span class="nicon">👤</span>Account</button>
+    </div>
+    <div class="nav-cta">
+      <button class="btn small" onclick="openEditor()">＋ New set</button>
+    </div>`;
+}
+/* ----- Account ----- */
+function renderAccount() {
+  let inner;
+  if (!FIREBASE_ENABLED) {
+    inner = `<h2>Account</h2><div class="auth-sub">Cloud sync is not configured — the app runs in local mode.</div>`;
+  } else if (user) {
+    inner = `
+      <h2>Account</h2>
+      <div class="auth-sub">Signed in as<br><strong style="color:var(--text)">${esc(user.email)}</strong></div>
+      <button class="btn secondary full" onclick="joinSet()">🔗 Join a shared set</button>
+      <div style="height:10px"></div>
+      <button class="btn danger full" onclick="doSignOut()">Sign out</button>`;
+  } else {
+    inner = `
+      <h2>Account</h2>
+      <div class="auth-sub">You're not signed in. Sign in to sync your sets across devices and study with friends.</div>
+      <button class="btn full" onclick="go('login')">Sign in</button>`;
+  }
+  const langOptions = LANGS.map(([code, name]) => `<option value="${code}">${name}</option>`).join('');
+  app.innerHTML = `
+    <header><div class="logo" onclick="go('home')">Study<span>Cards</span></div></header>
+    <div class="auth-card">${inner}</div>
+    <div class="auth-card" style="margin-top:16px;">
+      <h2 style="font-size:18px;">My language</h2>
+      <div class="auth-sub">New words are automatically translated into this language.</div>
+      <select id="lang-sel" class="lang-select" onchange="setAppLang(this.value)">${langOptions}</select>
+    </div>`;
+  const sel = document.getElementById('lang-sel');
+  if (sel) sel.value = APP_LANG;
 }
 
 /* ----- Login ----- */
@@ -614,6 +798,10 @@ async function loadCloudSets() {
     const snap = await db.collection('users').doc(user.uid).get();
     const data = snap.exists ? snap.data() : null;
     sharedRefs = (data && Array.isArray(data.sharedRefs)) ? data.sharedRefs : [];
+    if (data && data.lang) {
+      APP_LANG = data.lang;
+      try { localStorage.setItem('studycards.lang', data.lang); } catch (e) {}
+    }
     let own;
     if (data && Array.isArray(data.sets)) {
       own = data.sets;
@@ -691,14 +879,13 @@ async function joinSet() {
 /* ----- Home ----- */
 function renderHome() {
   const acct = !FIREBASE_ENABLED ? '' : user
-    ? `<span class="sync-badge" title="${esc(user.email)}">☁️ Synced</span> <button class="btn ghost small" onclick="doSignOut()">Sign out</button>`
+    ? `<span class="sync-badge" title="${esc(user.email)}">☁️ Synced</span>`
     : `<button class="btn ghost small" onclick="go('login')">Sign in</button>`;
   let html = `
     <header>
       <div class="logo" onclick="go('home')">Study<span>Cards</span></div>
       <div style="display:flex; align-items:center; gap:6px;">
         ${acct}
-        ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="joinSet()">🔗 Join set</button>` : ''}
         <button class="btn small" onclick="openEditor()">＋ New set</button>
       </div>
     </header>
@@ -729,6 +916,7 @@ function renderHome() {
 function renderSet() {
   const s = getSet(state.setId);
   if (!s) return go('home');
+  if (lastTermViewSet !== s.id) { termQuery = ''; termFilter = 'all'; termSort = 'new'; lastTermViewSet = s.id; }
   // Shared set: pull the latest version once per visit so partner edits show up
   if (s.shared && user && db && !state.refreshed) {
     state.refreshed = true;
@@ -760,35 +948,132 @@ function renderSet() {
       ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="shareSet('${s.id}')">${s.shared ? '👥 ' + fmtCode(s.shared) : '🔗 Share'}</button>` : ''}
       <button class="btn danger small" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
     </div>
-    <div class="section-title">Terms in this set</div>`;
-  s.cards.forEach((c, i) => {
+    <div class="section-title">Terms in this set</div>
+    <div class="term-toolbar">
+      <input type="text" id="term-search" placeholder="Search — or type a new word to add it" autocapitalize="off" value="${esc(termQuery)}" oninput="applyTermView('${s.id}')">
+      <select id="term-sort" onchange="applyTermView('${s.id}')">
+        <option value="new">New → Old</option>
+        <option value="old">Old → New</option>
+        <option value="az">A – Z</option>
+        <option value="missed">Most missed</option>
+      </select>
+    </div>
+    <div class="chips">
+      <button class="chip ${termFilter === 'all' ? 'active' : ''}" onclick="setTermFilter('${s.id}','all',this)">All</button>
+      <button class="chip ${termFilter === 'missed' ? 'active' : ''}" onclick="setTermFilter('${s.id}','missed',this)">❌ Most missed</button>
+    </div>
+    <div id="term-list"></div>`;
+  app.innerHTML = html;
+  const sortSel = document.getElementById('term-sort');
+  if (sortSel) sortSel.value = termSort;
+  applyTermView(s.id);
+}
+/* ----- Term list view: search / filter / sort ----- */
+let termQuery = '', termFilter = 'all', termSort = 'new', lastTermViewSet = null;
+function setTermFilter(setId, f, el) {
+  termFilter = f;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  if (el) el.classList.add('active');
+  applyTermView(setId);
+}
+function applyTermView(setId) {
+  const s = getSet(setId);
+  const list = document.getElementById('term-list');
+  if (!s || !list) return;
+  const searchEl = document.getElementById('term-search');
+  termQuery = searchEl ? searchEl.value.trim() : '';
+  const sortEl = document.getElementById('term-sort');
+  termSort = sortEl ? sortEl.value : 'new';
+  let items = s.cards.map((c, i) => ({ c, i }));
+  if (termFilter === 'missed') items = items.filter(x => (x.c.misses || 0) > 0);
+  if (termQuery) {
+    const q = termQuery.toLowerCase();
+    items = items.filter(x =>
+      (x.c.term || '').toLowerCase().includes(q) ||
+      (x.c.def || '').includes(termQuery) ||
+      (x.c.example || '').toLowerCase().includes(q));
+  }
+  if (termSort === 'new') items.reverse();
+  if (termSort === 'az') items.sort((a, b) => (a.c.term || '').localeCompare(b.c.term || ''));
+  if (termSort === 'missed') items.sort((a, b) => (b.c.misses || 0) - (a.c.misses || 0));
+  let html = '';
+  for (const { c, i } of items) {
     if (state.editIdx === i) {
       html += `
         <div class="term-row editing">
-          <input type="text" id="row-term" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" placeholder="Term">
-          <input type="text" id="row-def" value="${esc(c.def)}" placeholder="Definition">
+          <div class="edit-fields">
+            <div class="edit-line">
+              <input type="text" id="row-term" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" placeholder="Term">
+              <input type="text" id="row-def" value="${esc(c.def)}" placeholder="Definition">
+            </div>
+            <input type="text" id="row-ex" spellcheck="true" value="${esc(c.example || '')}" placeholder="Example sentence (optional)">
+          </div>
           <button class="icon-btn save" title="Save" onclick="saveCardRow('${s.id}', ${i})">✓</button>
           <button class="icon-btn" title="Cancel" onclick="go('set',{setId:'${s.id}'})">✕</button>
         </div>`;
     } else {
       html += `
         <div class="term-row">
-          <div class="term">${esc(c.term)}</div><div class="def">${esc(c.def)}${c.example ? `<div class="def-example">${esc(c.example)}</div>` : ''}</div>
+          <div class="term">${esc(c.term)}${(c.misses || 0) > 0 ? ` <span style="font-size:11px;color:var(--red);font-weight:700">×${c.misses}</span>` : ''}</div>
+          <div class="def">${esc(c.def)}</div>
           <button class="icon-btn" title="Edit this card" onclick="go('set',{setId:'${s.id}',editIdx:${i}})">✏️</button>
           ${speakBtn(c.term)}
+          ${c.example ? `
+          <button class="ex-toggle" onclick="toggleExample(this)">Sentence ▾</button>
+          <div class="row-example" style="display:none">${esc(c.example)} ${speakBtn(c.example)}</div>` : ''}
         </div>`;
     }
-  });
-  app.innerHTML = html;
+  }
+  if (!items.length) {
+    html = termQuery
+      ? `<div class="empty-list">No cards match "${esc(termQuery)}".<br><button class="btn small" onclick="quickAdd('${s.id}')">＋ Add "${esc(termQuery)}"</button></div>`
+      : `<div class="empty-list">No cards match this filter.</div>`;
+  }
+  list.innerHTML = html;
   if (typeof state.editIdx === 'number') { const el = document.getElementById('row-term'); if (el) el.focus(); }
+}
+function toggleExample(btn) {
+  const row = btn.closest('.term-row');
+  const ex = row && row.querySelector('.row-example');
+  if (!ex) return;
+  const open = ex.style.display !== 'none';
+  ex.style.display = open ? 'none' : '';
+  btn.classList.toggle('ex-open', !open);
+  btn.textContent = open ? 'Sentence ▾' : 'Sentence ▴';
+}
+async function quickAdd(setId) {
+  const s = getSet(setId);
+  const term = termQuery;
+  if (!s || !term) return;
+  const card = { term, def: '' };
+  s.cards.push(card);
+  saveSets();
+  toast(`Added "${term}" — translating…`);
+  try { card.def = await translateEn2Zh(term); } catch (e) { /* leave empty */ }
+  saveSets();
+  if (state.view === 'set' && state.setId === setId) {
+    const searchEl = document.getElementById('term-search');
+    if (card.def) {
+      if (searchEl) searchEl.value = '';
+      termQuery = '';
+      go('set', { setId });
+    } else {
+      toast('Translation unavailable — please fill in the definition');
+      termQuery = '';
+      go('set', { setId, editIdx: s.cards.length - 1 });
+    }
+  }
 }
 function saveCardRow(setId, i) {
   const s = getSet(setId);
   if (!s || !s.cards[i]) return;
   const term = document.getElementById('row-term').value.trim();
   const def = document.getElementById('row-def').value.trim();
+  const exEl = document.getElementById('row-ex');
+  const ex = exEl ? exEl.value.trim() : '';
   if (!term || !def) { toast('Term and definition cannot be empty'); return; }
   s.cards[i] = { ...s.cards[i], term, def };
+  if (ex) s.cards[i].example = ex; else delete s.cards[i].example;
   saveSets();
   toast('Card updated');
   go('set', { setId });
@@ -844,7 +1129,7 @@ function renderFlashcards() {
     <div class="flip-scene">
       <div class="flip-card ${fc.flipped ? 'flipped' : ''}" onclick="flipFc()">
         <div class="flip-face"><div class="hint">Term</div>${speakBtn(card.term)}${esc(card.term)}</div>
-        <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def)}<div>${esc(card.def)}${card.example ? `<div class="fc-example">${esc(card.example)} ${speakBtn(card.example)}</div>` : ''}</div></div>
+        <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def, APP_LANG)}<div>${esc(card.def)}${card.example ? `<div class="fc-example">${esc(card.example)} ${speakBtn(card.example)}</div>` : ''}</div></div>
       </div>
     </div>
     <div class="fc-controls">
@@ -961,7 +1246,7 @@ function answerQuiz(idx) {
   const srcSet = getSet(qz.setId);
   const srcCard = srcSet && srcSet.cards.find(c => c.term === q.term && c.def === q.answer);
   if (srcCard) {
-    if (correct) srcCard.misses = Math.max(0, (srcCard.misses || 0) - 1);
+    if (correct) srcCard.misses = 0; // answered right — clear the miss record
     else srcCard.misses = (srcCard.misses || 0) + 1;
   }
   const fb = document.getElementById('fb');
@@ -1031,6 +1316,9 @@ function renderEditor() {
       <input type="text" id="ed-title" placeholder="e.g. Biology Chapter 4" value="${esc(ed.title)}" oninput="ed.title=this.value">
     </div>
     <div class="section-title">Cards</div>
+    <div class="term-toolbar">
+      <input type="text" placeholder="Filter cards…" autocapitalize="off" oninput="filterEditorCards(this.value)">
+    </div>
     <div id="ed-cards">`;
   ed.cards.forEach((c, i) => { html += cardEditHTML(c, i); });
   html += `</div>
@@ -1101,6 +1389,14 @@ function ensureTrailingBlank(i) {
   ed.cards.push({ term: '', def: '' });
   const wrap = document.getElementById('ed-cards');
   if (wrap) wrap.insertAdjacentHTML('beforeend', cardEditHTML(ed.cards[ed.cards.length - 1], ed.cards.length - 1));
+}
+function filterEditorCards(q) {
+  q = q.trim().toLowerCase();
+  document.querySelectorAll('#ed-cards .card-edit').forEach(el => {
+    const inputs = el.querySelectorAll('input');
+    const hit = !q || [...inputs].some(inp => inp.value.toLowerCase().includes(q));
+    el.style.display = hit ? '' : 'none';
+  });
 }
 function addCard() { ed.cards.push({ term: '', def: '' }); renderEditor(); window.scrollTo(0, document.body.scrollHeight); }
 function removeCard(i) { ed.cards.splice(i, 1); if (!ed.cards.length) ed.cards.push({ term: '', def: '' }); renderEditor(); }
