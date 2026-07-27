@@ -65,7 +65,22 @@
     padding: 18px; margin-bottom: 12px; cursor:pointer;
     border: 1.5px solid transparent; transition: border-color .15s;
     position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
+  .set-card.drag-lift {
+    box-shadow: 0 12px 28px rgba(40,46,62,.28);
+    border-color: var(--primary); z-index: 30;
+    transition: none; cursor: grabbing;
+  }
+  .swipe-wrap { position: relative; margin-bottom: 12px; }
+  .swipe-wrap .set-card { margin-bottom: 0; position: relative; z-index: 1; }
+  .swipe-bg {
+    position: absolute; inset: 0; z-index: 0; visibility: hidden;
+    display: flex; align-items: center;
+    font-size: 24px; color: #ffffff; border-radius: var(--radius);
+  }
+  .swipe-bg.edit { background: var(--primary); justify-content: flex-start; padding-left: 26px; }
+  .swipe-bg.del { background: var(--red); justify-content: flex-end; padding-right: 26px; }
   .dot-btn {
     background: none; border: none; cursor: pointer;
     font-size: 22px; font-weight: 700; color: var(--muted);
@@ -228,7 +243,12 @@
   .card-edit {
     background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
     padding: 16px; margin-bottom: 12px; position:relative;
+    border: 1.5px solid transparent;
+    transition: background .15s, border-color .15s;
   }
+  .card-edit:focus-within { background: #f7f9ff; border-color: #b9c4ff; }
+  .card-edit:focus-within input { background: #ffffff; }
+  .card-edit:focus-within .num::after { content: ' · editing…'; color: var(--primary); }
   .card-edit .num { font-size:12px; font-weight:800; color:var(--muted); margin-bottom:10px; }
   .card-edit .remove {
     position:absolute; top:12px; right:12px; background:none; border:none;
@@ -275,6 +295,15 @@
   /* ---------- Search / filter / sort toolbar ---------- */
   .term-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
   .term-toolbar input { flex: 1; min-width: 0; padding: 11px 14px; font-size: 15px; }
+  .search-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+  .search-wrap input { flex: 1; padding-right: 42px; }
+  .clear-btn {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; cursor: pointer;
+    color: var(--muted); font-size: 15px; font-weight: 700;
+    padding: 10px 12px; line-height: 1; border-radius: 50%;
+  }
+  .clear-btn:active { color: var(--text); }
   .term-toolbar select {
     border: 1.5px solid var(--border); border-radius: 12px;
     color: var(--text); font-size: 14px; font-weight: 600;
@@ -895,7 +924,10 @@ function renderHome() {
   } else {
     for (const s of sets) {
       html += `
-        <div class="set-card" onclick="go('set',{setId:'${s.id}'})">
+        <div class="swipe-wrap">
+        <div class="swipe-bg edit">✎</div>
+        <div class="swipe-bg del">🗑</div>
+        <div class="set-card" data-id="${s.id}" onclick="openSetCard('${s.id}')">
           <div>
             <h3>${esc(s.title)}</h3>
             <div class="meta">${s.cards.length} terms${s.shared ? ' · 👥 shared' : ''}</div>
@@ -906,10 +938,145 @@ function renderHome() {
             ${FIREBASE_ENABLED ? `<button onclick="shareSet('${s.id}')">🔗 Share</button>` : ''}
             <button class="danger" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
           </div>
+        </div>
         </div>`;
     }
   }
   app.innerHTML = html;
+  initSetDrag();
+}
+
+/* ----- Long-press drag to reorder sets ----- */
+let suppressCardClick = false;
+function openSetCard(id) {
+  if (suppressCardClick) return;
+  go('set', { setId: id });
+}
+function initSetDrag() {
+  document.querySelectorAll('.set-card[data-id]').forEach(el => {
+    el.addEventListener('pointerdown', onCardPointerDown);
+    el.addEventListener('touchstart', onCardTouchStart, { passive: true });
+  });
+}
+/* Gmail-style horizontal swipe: left = delete/leave, right = edit */
+function onCardTouchStart(e) {
+  if (e.touches.length !== 1) return;
+  if (e.target.closest('.dot-btn') || e.target.closest('.dot-menu')) return;
+  const el = e.currentTarget;
+  const wrap = el.closest('.swipe-wrap');
+  const bgEdit = wrap && wrap.querySelector('.swipe-bg.edit');
+  const bgDel = wrap && wrap.querySelector('.swipe-bg.del');
+  const sw = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, active: false, dx: 0 };
+  const onMove = ev => {
+    if (suppressCardClick && !sw.active) { finish(false); return; } // long-press reorder took over
+    const t = ev.touches[0];
+    const dx = t.clientX - sw.x0, dy = t.clientY - sw.y0;
+    if (!sw.active) {
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { finish(false); return; } // vertical scroll
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) sw.active = true;
+      else return;
+    }
+    sw.dx = dx;
+    el.style.transform = `translateX(${dx}px)`;
+    if (bgEdit) bgEdit.style.visibility = dx > 0 ? 'visible' : 'hidden';
+    if (bgDel) bgDel.style.visibility = dx < 0 ? 'visible' : 'hidden';
+  };
+  const onEnd = () => finish(true);
+  function finish(fromUp) {
+    el.removeEventListener('touchmove', onMove);
+    el.removeEventListener('touchend', onEnd);
+    el.removeEventListener('touchcancel', onEnd);
+    const dx = sw.dx;
+    const trigger = sw.active && Math.abs(dx) > Math.min(140, window.innerWidth * 0.3);
+    el.style.transition = 'transform .18s';
+    el.style.transform = '';
+    setTimeout(() => {
+      el.style.transition = '';
+      if (bgEdit) bgEdit.style.visibility = 'hidden';
+      if (bgDel) bgDel.style.visibility = 'hidden';
+    }, 200);
+    if (sw.active) { suppressCardClick = true; setTimeout(() => { suppressCardClick = false; }, 300); }
+    if (fromUp && trigger) {
+      const id = el.dataset.id;
+      if (dx < 0) deleteSet(id);
+      else openEditor(id);
+    }
+  }
+  el.addEventListener('touchmove', onMove, { passive: true });
+  el.addEventListener('touchend', onEnd);
+  el.addEventListener('touchcancel', onEnd);
+}
+function onCardPointerDown(e) {
+  if (e.target.closest('.dot-btn') || e.target.closest('.dot-menu')) return;
+  const el = e.currentTarget;
+  const startX = e.clientX, startY = e.clientY;
+  const timer = setTimeout(() => { cleanup(); beginDrag(el, startY); }, 450);
+  const onMove = ev => {
+    if (Math.abs(ev.clientX - startX) > 8 || Math.abs(ev.clientY - startY) > 8) cleanup();
+  };
+  const cleanup = () => {
+    clearTimeout(timer);
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', cleanup);
+    document.removeEventListener('pointercancel', cleanup);
+  };
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', cleanup);
+  document.addEventListener('pointercancel', cleanup);
+}
+function beginDrag(el, startY) {
+  if (navigator.vibrate) navigator.vibrate(30);
+  const box = el.closest('.swipe-wrap') || el;
+  el.classList.add('drag-lift');
+  suppressCardClick = true;
+  const GAP = 12; // wrapper margin-bottom
+  let baseY = startY;
+  const prevent = ev => ev.preventDefault();
+  const setTf = y => { box.style.transform = `translateY(${y - baseY}px) scale(1.02)`; };
+  const onMove = ev => {
+    setTf(ev.clientY);
+    const rect = box.getBoundingClientRect();
+    const center = rect.top + rect.height / 2;
+    const boxes = [...document.querySelectorAll('.swipe-wrap')];
+    const idx = boxes.indexOf(box);
+    const prev = boxes[idx - 1], next = boxes[idx + 1];
+    if (prev) {
+      const pr = prev.getBoundingClientRect();
+      if (center < pr.top + pr.height / 2) {
+        prev.parentNode.insertBefore(box, prev);
+        baseY -= pr.height + GAP;
+        setTf(ev.clientY);
+        return;
+      }
+    }
+    if (next) {
+      const nr = next.getBoundingClientRect();
+      if (center > nr.top + nr.height / 2) {
+        next.parentNode.insertBefore(box, next.nextSibling);
+        baseY += nr.height + GAP;
+        setTf(ev.clientY);
+      }
+    }
+  };
+  const onUp = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onUp);
+    document.removeEventListener('touchmove', prevent);
+    el.classList.remove('drag-lift');
+    box.style.transform = '';
+    setTimeout(() => { suppressCardClick = false; }, 300);
+    // persist the new DOM order
+    const ids = [...document.querySelectorAll('.set-card[data-id]')].map(c => c.dataset.id);
+    sets.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+    sharedRefs = sets.filter(s => s.shared).map(s => s.shared);
+    saveSets();
+    toast('Order updated');
+  };
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+  document.addEventListener('pointercancel', onUp);
+  document.addEventListener('touchmove', prevent, { passive: false });
 }
 
 /* ----- Set detail ----- */
@@ -950,7 +1117,10 @@ function renderSet() {
     </div>
     <div class="section-title">Terms in this set</div>
     <div class="term-toolbar">
-      <input type="text" id="term-search" placeholder="Search — or type a new word to add it" autocapitalize="off" value="${esc(termQuery)}" oninput="applyTermView('${s.id}')">
+      <div class="search-wrap">
+        <input type="text" id="term-search" placeholder="Search — or type a new word to add it" autocapitalize="off" value="${esc(termQuery)}" oninput="applyTermView('${s.id}'); toggleClearBtn(this)">
+        <button class="clear-btn" id="term-clear" title="Clear" onclick="clearTermSearch('${s.id}')" style="display:${termQuery ? '' : 'none'}">✕</button>
+      </div>
       <select id="term-sort" onchange="applyTermView('${s.id}')">
         <option value="new">New → Old</option>
         <option value="old">Old → New</option>
@@ -1031,6 +1201,15 @@ function applyTermView(setId) {
   }
   list.innerHTML = html;
   if (typeof state.editIdx === 'number') { const el = document.getElementById('row-term'); if (el) el.focus(); }
+}
+function toggleClearBtn(input) {
+  const btn = document.getElementById('term-clear');
+  if (btn) btn.style.display = input.value ? '' : 'none';
+}
+function clearTermSearch(setId) {
+  const input = document.getElementById('term-search');
+  if (input) { input.value = ''; input.focus(); toggleClearBtn(input); }
+  applyTermView(setId);
 }
 function toggleExample(btn) {
   const row = btn.closest('.term-row');
@@ -1138,7 +1317,11 @@ function renderFlashcards() {
       <button class="nav-btn" onclick="moveFc(1)" ${fc.i === fc.order.length - 1 ? 'disabled' : ''}>→</button>
     </div>
     <div class="progress-bar" style="margin:20px 0 0"><div class="fill" style="width:${pct}%"></div></div>
-    <div class="fc-tip">Tap the card to flip</div>`;
+    <div class="fc-tip">Tap the card to flip</div>
+    ${fc.i === fc.order.length - 1 ? `
+    <div style="text-align:center; margin-top:24px;">
+      <button class="btn" onclick="go('set',{setId:'${s.id}'})">← Back to set</button>
+    </div>` : ''}`;
 }
 function flipFc() { fc.flipped = !fc.flipped; document.querySelector('.flip-card').classList.toggle('flipped', fc.flipped); }
 function moveFc(d) {
@@ -1277,7 +1460,7 @@ function renderQuizResult() {
       <p>You got ${qz.score} out of ${qz.qs.length} correct.<br>${msg}</p>
       <div class="result-actions">
         <button class="btn" onclick="startQuiz('${s.id}')">Retake quiz</button>
-        <button class="btn secondary" onclick="startFlashcards('${s.id}')">Review flashcards</button>
+        <button class="btn secondary" onclick="go('set',{setId:'${s.id}'})">Back to set</button>
       </div>
     </div>
     <div class="section-title" style="margin-top:28px">Answer key</div>`;
@@ -1298,9 +1481,11 @@ function renderQuizResult() {
 /* ----- Editor ----- */
 let ed = null;
 function openEditor(setId) {
+  edQuery = ''; edSort = 'new';
   if (setId) {
     const s = getSet(setId);
-    ed = { id: setId, title: s.title, cards: s.cards.map(c => ({ ...c })) };
+    // start with a fresh blank card on top, ready to type into
+    ed = { id: setId, title: s.title, cards: [...s.cards.map(c => ({ ...c })), { term: '', def: '' }] };
   } else {
     ed = { id: null, title: '', cards: [{ term: '', def: '' }, { term: '', def: '' }, { term: '', def: '' }] };
   }
@@ -1310,24 +1495,113 @@ function renderEditor() {
   if (!ed) return go('home');
   let html = `
     <div class="back" onclick="cancelEdit()">← Cancel</div>
-    <div class="set-title" style="margin-bottom:20px">${ed.id ? 'Edit set' : 'Create a new set'}</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px;">
+      <div class="set-title" style="margin-bottom:0">${ed.id ? 'Edit set' : 'Create a new set'}</div>
+      <button class="btn small" onclick="saveEdit()">${ed.id ? 'Save changes' : 'Create set'}</button>
+    </div>
     <div class="field">
       <label>Title</label>
       <input type="text" id="ed-title" placeholder="e.g. Biology Chapter 4" value="${esc(ed.title)}" oninput="ed.title=this.value">
     </div>
     <div class="section-title">Cards</div>
     <div class="term-toolbar">
-      <input type="text" placeholder="Filter cards…" autocapitalize="off" oninput="filterEditorCards(this.value)">
+      <div class="search-wrap">
+        <input type="text" id="ed-search" placeholder="Search cards…" autocapitalize="off" value="${esc(edQuery)}" oninput="applyEditorView(); toggleEdClearBtn(this)">
+        <button class="clear-btn" id="ed-clear" title="Clear" onclick="clearEdSearch()" style="display:${edQuery ? '' : 'none'}">✕</button>
+      </div>
+      <select id="ed-sort" onchange="applyEditorView()">
+        <option value="new">New → Old</option>
+        <option value="old">Old → New</option>
+        <option value="az">A – Z</option>
+        <option value="missed">Most missed</option>
+      </select>
+    </div>
+    <div id="ed-addtop" style="display:none; margin-bottom:12px;">
+      <button class="btn secondary full" onclick="addCard()">＋ Add card</button>
     </div>
     <div id="ed-cards">`;
-  ed.cards.forEach((c, i) => { html += cardEditHTML(c, i); });
   html += `</div>
-    <button class="btn secondary full" onclick="addCard()">＋ Add card</button>
-    <div class="editor-actions">
-      <button class="btn secondary" onclick="cancelEdit()">Cancel</button>
-      <button class="btn" onclick="saveEdit()">${ed.id ? 'Save changes' : 'Create set'}</button>
+    <div id="ed-footer">
+      <button id="ed-addbottom" class="btn secondary full" onclick="addCard()">＋ Add card</button>
+      <div class="editor-actions">
+        <button class="btn secondary" onclick="cancelEdit()">Cancel</button>
+        <button class="btn" onclick="saveEdit()">${ed.id ? 'Save changes' : 'Create set'}</button>
+      </div>
     </div>`;
   app.innerHTML = html;
+  const edSortEl = document.getElementById('ed-sort');
+  if (edSortEl) edSortEl.value = edSort;
+  applyEditorView();
+  if (ed.id) {
+    const first = document.querySelector('#ed-cards .card-edit input');
+    if (first && !first.value) first.focus(); // jump straight into the fresh blank card
+  }
+}
+/* ----- Editor view: search / filter / sort ----- */
+let edQuery = '', edSort = 'new';
+function applyEditorView() {
+  if (!ed) return;
+  const list = document.getElementById('ed-cards');
+  if (!list) return;
+  const sEl = document.getElementById('ed-search');
+  edQuery = sEl ? sEl.value.trim() : '';
+  const sortEl = document.getElementById('ed-sort');
+  edSort = sortEl ? sortEl.value : 'new';
+  let items = ed.cards.map((c, i) => ({ c, i }));
+  if (edQuery) {
+    const q = edQuery.toLowerCase();
+    items = items.filter(x =>
+      (x.c.term || '').toLowerCase().includes(q) ||
+      (x.c.def || '').includes(edQuery) ||
+      (x.c.example || '').toLowerCase().includes(q));
+  }
+  if (edSort === 'new') items.reverse();
+  if (edSort === 'az') items.sort((a, b) => {
+    const ta = (a.c.term || '').trim(), tb = (b.c.term || '').trim();
+    if (!ta && tb) return 1;  // blank (new) cards stay at the bottom
+    if (ta && !tb) return -1;
+    return ta.localeCompare(tb);
+  });
+  if (edSort === 'missed') items.sort((a, b) => (b.c.misses || 0) - (a.c.misses || 0));
+  const footer = document.getElementById('ed-footer');
+  if (footer) footer.style.display = edQuery ? 'none' : '';
+  // In New → Old, the fresh card appears on top, so put "Add card" up there too
+  const addTop = document.getElementById('ed-addtop');
+  if (addTop) addTop.style.display = (edSort === 'new' && !edQuery) ? '' : 'none';
+  const addBottom = document.getElementById('ed-addbottom');
+  if (addBottom) addBottom.style.display = edSort === 'new' ? 'none' : '';
+  list.innerHTML = items.map(x => cardEditHTML(x.c, x.i)).join('')
+    || (edQuery
+      ? `<div class="empty-list">No cards match "${esc(edQuery)}".<br><button class="btn small" onclick="quickAddEditor()">＋ Add "${esc(edQuery)}"</button></div>`
+      : `<div class="empty-list">No cards match.</div>`);
+}
+async function quickAddEditor() {
+  if (!ed || !edQuery) return;
+  const term = edQuery;
+  const card = { term, def: '' };
+  ed.cards.push(card);
+  clearEdSearch(); // shows the new card (top of the list in New → Old)
+  toast(`Added "${term}" — translating…`);
+  try {
+    const zh = await translateEn2Zh(term);
+    if (!card.def) { // don't overwrite if the user typed something meanwhile
+      card.def = zh;
+      // update the visible input directly so we don't disturb any typing in progress
+      document.querySelectorAll('#ed-cards .card-edit').forEach(el => {
+        const inputs = el.querySelectorAll('input');
+        if (inputs[0] && inputs[0].value === term && inputs[1] && !inputs[1].value) inputs[1].value = zh;
+      });
+    }
+  } catch (e) { toast('Translation unavailable — please fill in the definition'); }
+}
+function toggleEdClearBtn(input) {
+  const btn = document.getElementById('ed-clear');
+  if (btn) btn.style.display = input.value ? '' : 'none';
+}
+function clearEdSearch() {
+  const input = document.getElementById('ed-search');
+  if (input) { input.value = ''; input.focus(); toggleEdClearBtn(input); }
+  applyEditorView();
 }
 function cardEditHTML(c, i) {
   return `
@@ -1388,17 +1662,19 @@ function ensureTrailingBlank(i) {
   if (!String(last.term || '').trim() && !String(last.def || '').trim() && !String(last.example || '').trim()) return;
   ed.cards.push({ term: '', def: '' });
   const wrap = document.getElementById('ed-cards');
-  if (wrap) wrap.insertAdjacentHTML('beforeend', cardEditHTML(ed.cards[ed.cards.length - 1], ed.cards.length - 1));
+  if (wrap) wrap.insertAdjacentHTML(edSort === 'new' ? 'afterbegin' : 'beforeend', cardEditHTML(ed.cards[ed.cards.length - 1], ed.cards.length - 1));
 }
-function filterEditorCards(q) {
-  q = q.trim().toLowerCase();
-  document.querySelectorAll('#ed-cards .card-edit').forEach(el => {
-    const inputs = el.querySelectorAll('input');
-    const hit = !q || [...inputs].some(inp => inp.value.toLowerCase().includes(q));
-    el.style.display = hit ? '' : 'none';
-  });
+function addCard() {
+  ed.cards.push({ term: '', def: '' });
+  renderEditor();
+  if (edSort === 'new') {
+    window.scrollTo(0, 0);
+    const first = document.querySelector('#ed-cards .card-edit input');
+    if (first && !first.value) first.focus();
+  } else {
+    window.scrollTo(0, document.body.scrollHeight);
+  }
 }
-function addCard() { ed.cards.push({ term: '', def: '' }); renderEditor(); window.scrollTo(0, document.body.scrollHeight); }
 function removeCard(i) { ed.cards.splice(i, 1); if (!ed.cards.length) ed.cards.push({ term: '', def: '' }); renderEditor(); }
 function cancelEdit() { const back = ed && ed.id ? { view: 'set', setId: ed.id } : { view: 'home' }; ed = null; go(back.view, back); }
 function saveEdit() {
@@ -1427,6 +1703,49 @@ function saveEdit() {
     go('set', { setId: s.id });
   }
 }
+
+/* ----- Swipe-from-left-edge to go back (like native apps) ----- */
+function backTarget() {
+  switch (state.view) {
+    case 'set': return () => go('home');
+    case 'flashcards':
+    case 'quiz':
+    case 'quizResult': return () => go('set', { setId: state.setId });
+    case 'edit': return () => cancelEdit();
+    case 'account': return () => go('home');
+    default: return null;
+  }
+}
+let edgeSwipe = null;
+document.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) return;
+  const t = e.touches[0];
+  if (t.clientX > 28) return;           // must start at the left edge
+  if (!backTarget()) return;            // no previous page on this view
+  edgeSwipe = { x0: t.clientX, y0: t.clientY, active: false };
+}, { passive: true });
+document.addEventListener('touchmove', e => {
+  if (!edgeSwipe) return;
+  const t = e.touches[0];
+  const dx = t.clientX - edgeSwipe.x0;
+  const dy = Math.abs(t.clientY - edgeSwipe.y0);
+  if (!edgeSwipe.active && dy > 60) { edgeSwipe = null; app.style.transform = ''; return; }
+  if (dx > 10) edgeSwipe.active = true;
+  if (edgeSwipe.active) app.style.transform = `translateX(${Math.max(0, dx)}px)`;
+}, { passive: true });
+document.addEventListener('touchend', e => {
+  if (!edgeSwipe) return;
+  const dx = e.changedTouches[0].clientX - edgeSwipe.x0;
+  const wasActive = edgeSwipe.active;
+  edgeSwipe = null;
+  app.style.transition = 'transform .18s';
+  app.style.transform = '';
+  setTimeout(() => { app.style.transition = ''; }, 200);
+  if (wasActive && dx > 90) {
+    const back = backTarget();
+    if (back) back();
+  }
+});
 
 /* ----- Keyboard shortcuts for flashcards ----- */
 document.addEventListener('keydown', e => {
