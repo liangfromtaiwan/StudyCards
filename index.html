@@ -987,7 +987,11 @@ function onCardTouchStart(e) {
     el.removeEventListener('touchend', onEnd);
     el.removeEventListener('touchcancel', onEnd);
     const dx = sw.dx;
-    const trigger = sw.active && Math.abs(dx) > Math.min(140, window.innerWidth * 0.3);
+    const cardW = el.offsetWidth || window.innerWidth;
+    // delete is destructive — require a much longer swipe (2/3 of the card width)
+    const trigger = sw.active && (dx > 0
+      ? dx > Math.min(140, cardW * 0.3)
+      : -dx > cardW * (2 / 3));
     el.style.transition = 'transform .18s';
     el.style.transform = '';
     setTimeout(() => {
