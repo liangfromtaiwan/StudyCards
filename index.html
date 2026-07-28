@@ -41,6 +41,12 @@
     position: fixed; inset: 0; background: #000;
     opacity: 0; z-index: 0; pointer-events: none;
   }
+  #page-under {
+    position: fixed; inset: 0; z-index: 0;
+    background: var(--bg); display: none; overflow: hidden;
+    pointer-events: none;
+  }
+  #ghost-app { max-width: 640px; margin: 0 auto; padding: 20px 16px 100px; }
 
   /* ---------- Header ---------- */
   header {
@@ -363,7 +369,7 @@
   #navbar {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
     background: var(--card); border-top: 1.5px solid var(--border);
-    display: flex; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    display: flex; padding-bottom: max(calc(env(safe-area-inset-bottom, 0px) - 8px), 6px);
     box-shadow: 0 -2px 12px rgba(40,46,62,.06);
   }
   .nav-item {
@@ -461,6 +467,7 @@
 </style>
 </head>
 <body>
+<div id="page-under"><div id="ghost-app"></div></div>
 <div id="back-dim"></div>
 <div id="app">
   <div class="splash">
@@ -570,7 +577,7 @@ saveSets();
 
 /* =====================  State & helpers  ===================== */
 let state = { view: 'home' };
-const app = document.getElementById('app');
+let app = document.getElementById('app'); // mutable so a "ghost" render can target the under-layer
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => 'set-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -1298,7 +1305,17 @@ function applyTermView(setId) {
   }
   list.innerHTML = html;
   initTermSwipe();
-  if (typeof state.editIdx === 'number') { const el = document.getElementById('row-term'); if (el) el.focus(); }
+  if (typeof state.editIdx === 'number') {
+    const el = document.getElementById('row-term');
+    if (el) {
+      el.focus();
+      // after the keyboard opens, make sure the editing row sits above it
+      setTimeout(() => {
+        const row = el.closest('.term-row');
+        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 350);
+    }
+  }
 }
 function deleteCard(setId, i) {
   const s = getSet(setId);
@@ -1651,22 +1668,101 @@ function answerQuiz(idx) {
     else renderQuiz();
   }, correct ? 900 : 1600);
 }
-async function shareQuizResult() {
-  if (!qz) return;
+/* Share the result as a picture: draw a scorecard on canvas, then share/download */
+function buildResultCanvas() {
   const s = getSet(qz.setId);
   const pct = Math.round((qz.score / qz.qs.length) * 100);
-  const grid = qz.qs.map(q => q.correct ? '✅' : (q.skipped ? '⬜' : '❌')).join('');
-  const text = `StudyCards Quiz — ${s ? s.title : ''}\n${pct}%  ${grid}\nStudy English with me → https://liangfromtaiwan.github.io/StudyCards/`;
-  if (navigator.share) {
-    try { await navigator.share({ text }); toast('Shared! 🎉'); return; }
-    catch (e) { if (e.name === 'AbortError') return; /* fall through to clipboard */ }
+  const grid = qz.qs.map(q => q.correct ? '✅' : (q.skipped ? '⬜' : '❌')).join(' ');
+  const groups = [
+    ['✅', qz.qs.filter(q => q.correct).map(q => q.term)],
+    ['❌', qz.qs.filter(q => !q.correct && !q.skipped).map(q => q.term)],
+    ['⬜', qz.qs.filter(q => q.skipped).map(q => q.term)],
+  ].filter(g => g[1].length);
+
+  const W = 1080, PAD = 80;
+  const FONT = "-apple-system, 'Segoe UI', 'Noto Sans CJK TC', sans-serif";
+  // measure pass
+  const m = document.createElement('canvas').getContext('2d');
+  const wrapText = (text, font, maxW) => {
+    m.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (m.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+      else line = test;
+    }
+    if (line) lines.push(line);
+    return lines;
+  };
+  const listFont = `500 30px ${FONT}`;
+  const listLines = [];
+  for (const [icon, terms] of groups) {
+    for (const l of wrapText(icon + ' ' + terms.join(', '), listFont, W - PAD * 2)) listLines.push(l);
   }
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('Result copied — paste it anywhere!');
-  } catch (e) {
-    prompt('Copy your result:', text);
-  }
+  const H = 640 + listLines.length * 48 + 130;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  // background + header band
+  ctx.fillStyle = '#f6f7fb'; ctx.fillRect(0, 0, W, H);
+  const grad = ctx.createLinearGradient(0, 0, W, 260);
+  grad.addColorStop(0, '#5b6bff'); grad.addColorStop(1, '#3a2fd4');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, 260);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `800 62px ${FONT}`;
+  ctx.fillText('StudyCards', PAD, 118);
+  ctx.font = `700 34px ${FONT}`;
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  ctx.fillText('QUIZ RESULT', PAD, 178);
+  ctx.font = `600 30px ${FONT}`;
+  ctx.textAlign = 'right';
+  ctx.fillText(new Date().toISOString().slice(0, 10), W - PAD, 118);
+  ctx.textAlign = 'left';
+  // set title
+  ctx.fillStyle = '#282e3e';
+  ctx.font = `800 46px ${FONT}`;
+  ctx.fillText((getSet(qz.setId) || {}).title || 'Quiz', PAD, 350);
+  // score
+  ctx.fillStyle = '#4255ff';
+  ctx.font = `800 130px ${FONT}`;
+  ctx.fillText(pct + '%', PAD, 490);
+  const pctW = ctx.measureText(pct + '%').width;
+  ctx.fillStyle = '#646f90';
+  ctx.font = `700 36px ${FONT}`;
+  ctx.fillText(`${qz.score} / ${qz.qs.length} correct`, PAD + pctW + 40, 480);
+  // emoji grid
+  ctx.font = `44px ${FONT}`;
+  ctx.fillText(grid, PAD, 580);
+  // word lists
+  ctx.font = listFont;
+  ctx.fillStyle = '#282e3e';
+  let y = 660;
+  for (const line of listLines) { ctx.fillText(line, PAD, y); y += 48; }
+  // footer
+  ctx.fillStyle = '#4255ff';
+  ctx.font = `700 30px ${FONT}`;
+  ctx.fillText('liangfromtaiwan.github.io/StudyCards', PAD, H - 60);
+  return canvas;
+}
+function shareQuizImage() {
+  if (!qz) return;
+  buildResultCanvas().toBlob(async blob => {
+    if (!blob) { toast('Could not create the image'); return; }
+    const file = new File([blob], 'studycards-quiz.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); toast('Shared! 🎉'); return; }
+      catch (e) { if (e.name === 'AbortError') return; /* fall through */ }
+    }
+    // fallback: download the image
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'studycards-quiz.png';
+    a.click();
+    toast('Image saved — share it anywhere!');
+  }, 'image/png');
 }
 function renderQuizResult() {
   const s = getSet(state.setId);
@@ -1680,7 +1776,7 @@ function renderQuizResult() {
       <p>You got ${qz.score} out of ${qz.qs.length} correct.<br>${msg}</p>
       <div class="result-actions">
         <button class="btn" onclick="startQuiz('${s.id}')">Retake quiz</button>
-        <button class="btn secondary" onclick="shareQuizResult()">📤 Share result</button>
+        <button class="btn secondary" onclick="shareQuizImage()">🖼 Share result</button>
         <button class="btn secondary" onclick="go('set',{setId:'${s.id}'})">Back to set</button>
       </div>
     </div>
@@ -1937,13 +2033,36 @@ function backTarget() {
     default: return null;
   }
 }
+// Pre-render the PREVIOUS page into the under-layer so the user sees real content while swiping
+function renderGhostPrev() {
+  const ghost = document.getElementById('ghost-app');
+  if (!ghost) return false;
+  let prev;
+  switch (state.view) {
+    case 'set': prev = { view: 'home' }; break;
+    case 'flashcards':
+    case 'quiz':
+    case 'quizResult': prev = { view: 'set', setId: state.setId }; break;
+    case 'edit': prev = ed && ed.id ? { view: 'set', setId: ed.id } : { view: 'home' }; break;
+    case 'account': prev = { view: 'home' }; break;
+    default: return false;
+  }
+  const savedApp = app, savedState = state;
+  app = ghost; state = prev;
+  try {
+    if (prev.view === 'home') renderHome();
+    else if (prev.view === 'set') renderSet();
+  } catch (err) { app = savedApp; state = savedState; return false; }
+  app = savedApp; state = savedState;
+  return true;
+}
 let edgeSwipe = null;
 document.addEventListener('touchstart', e => {
   if (e.touches.length !== 1) return;
   const t = e.touches[0];
   if (t.clientX > 28) return;           // must start at the left edge
   if (!backTarget()) return;            // no previous page on this view
-  edgeSwipe = { x0: t.clientX, y0: t.clientY, active: false };
+  edgeSwipe = { x0: t.clientX, y0: t.clientY, active: false, ghost: false };
 }, { passive: true });
 document.addEventListener('touchmove', e => {
   if (!edgeSwipe) return;
@@ -1951,61 +2070,72 @@ document.addEventListener('touchmove', e => {
   const dx = t.clientX - edgeSwipe.x0;
   const dy = Math.abs(t.clientY - edgeSwipe.y0);
   const dim = document.getElementById('back-dim');
+  const under = document.getElementById('page-under');
   if (!edgeSwipe.active && dy > 60) {
     edgeSwipe = null;
     app.style.transform = '';
     app.classList.remove('swiping');
     if (dim) dim.style.opacity = '0';
+    if (under) under.style.display = 'none';
     return;
   }
-  if (dx > 10) edgeSwipe.active = true;
+  if (dx > 10 && !edgeSwipe.active) {
+    edgeSwipe.active = true;
+    edgeSwipe.ghost = renderGhostPrev();      // draw the previous page underneath
+    if (edgeSwipe.ghost && under) {
+      under.style.display = 'block';
+      under.style.transform = 'translateX(-25%)';
+    }
+  }
   if (edgeSwipe.active) {
     const x = Math.max(0, dx);
+    const p = Math.min(1, x / window.innerWidth);
     app.classList.add('swiping');
     app.style.transform = `translateX(${x}px)`;
-    if (dim) dim.style.opacity = String(0.18 * Math.max(0, 1 - x / window.innerWidth));
+    if (edgeSwipe.ghost && under) under.style.transform = `translateX(${-25 * (1 - p)}%)`;
+    if (dim) dim.style.opacity = String(0.18 * (1 - p));
   }
 }, { passive: true });
 document.addEventListener('touchend', e => {
   if (!edgeSwipe) return;
   const dx = e.changedTouches[0].clientX - edgeSwipe.x0;
   const wasActive = edgeSwipe.active;
+  const hadGhost = edgeSwipe.ghost;
   edgeSwipe = null;
   const dim = document.getElementById('back-dim');
+  const under = document.getElementById('page-under');
   const back = backTarget();
+  const cleanup = () => {
+    app.style.transition = '';
+    app.classList.remove('swiping');
+    if (dim) { dim.style.transition = ''; dim.style.opacity = '0'; }
+    if (under) { under.style.transition = ''; under.style.display = 'none'; }
+  };
   if (wasActive && dx > 90 && back) {
-    // 1) current page slides out to the right…
-    app.style.transition = 'transform .18s ease-out';
+    // commit: current page slides fully out while the real previous page settles into place
+    app.style.transition = 'transform .2s ease-out';
     app.style.transform = 'translateX(100vw)';
+    if (hadGhost && under) {
+      under.style.transition = 'transform .2s ease-out';
+      under.style.transform = 'translateX(0)';
+    }
+    if (dim) { dim.style.transition = 'opacity .2s ease-out'; dim.style.opacity = '0'; }
     setTimeout(() => {
-      // 2) …previous page comes in from the left, softly
+      back();                       // render the previous page into the real layer
       app.style.transition = 'none';
-      back();
-      app.style.transform = 'translateX(-18%)';
-      app.style.opacity = '.8';
-      if (dim) dim.style.opacity = '.15';
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        app.style.transition = 'transform .22s ease-out, opacity .22s ease-out';
-        app.style.transform = '';
-        app.style.opacity = '';
-        if (dim) { dim.style.transition = 'opacity .22s ease-out'; dim.style.opacity = '0'; }
-        setTimeout(() => {
-          app.style.transition = '';
-          app.classList.remove('swiping');
-          if (dim) dim.style.transition = '';
-        }, 240);
-      }));
-    }, 185);
+      app.style.transform = '';
+      cleanup();
+    }, 205);
   } else {
-    // not far enough — snap back
+    // cancel: snap everything back
     app.style.transition = 'transform .18s ease-out';
     app.style.transform = '';
+    if (hadGhost && under) {
+      under.style.transition = 'transform .18s ease-out';
+      under.style.transform = 'translateX(-25%)';
+    }
     if (dim) { dim.style.transition = 'opacity .18s ease-out'; dim.style.opacity = '0'; }
-    setTimeout(() => {
-      app.style.transition = '';
-      app.classList.remove('swiping');
-      if (dim) dim.style.transition = '';
-    }, 200);
+    setTimeout(cleanup, 200);
   }
 });
 
