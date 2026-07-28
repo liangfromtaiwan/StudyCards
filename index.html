@@ -1066,7 +1066,7 @@ function onCardTouchStart(e) {
   const sw = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, active: false, dx: 0, armed: false };
   const cardW = () => el.offsetWidth || window.innerWidth;
   // delete is destructive — require a much longer swipe (2/3 of the card width)
-  const isTriggered = dx => dx > 0 ? dx > Math.min(140, cardW() * 0.3) : -dx > cardW() * (2 / 3);
+  const isTriggered = dx => Math.abs(dx) > Math.min(140, cardW() * 0.3);
   const onMove = ev => {
     if (suppressCardClick && !sw.active) { finish(false); return; } // long-press reorder took over
     const t = ev.touches[0];
@@ -1352,7 +1352,7 @@ function onTermTouchStart(e) {
   const bgDel = wrap && wrap.querySelector('.swipe-bg.del');
   const sw = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, active: false, dx: 0, armed: false };
   const rowW = () => el.offsetWidth || window.innerWidth;
-  const isTriggered = dx => dx > 0 ? dx > Math.min(140, rowW() * 0.3) : -dx > rowW() * (2 / 3);
+  const isTriggered = dx => Math.abs(dx) > Math.min(140, rowW() * 0.3);
   const onMove = ev => {
     const t = ev.touches[0];
     const dx = t.clientX - sw.x0, dy = t.clientY - sw.y0;
