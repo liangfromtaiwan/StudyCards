@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="StudyCards">
@@ -32,7 +32,15 @@
     background: var(--bg); color: var(--text);
     min-height: 100vh;
   }
-  #app { max-width: 640px; margin: 0 auto; padding: 20px 16px 100px; }
+  #app {
+    max-width: 640px; margin: 0 auto; padding: 20px 16px 100px;
+    position: relative; z-index: 1; background: var(--bg); min-height: 100vh;
+  }
+  #app.swiping { box-shadow: -10px 0 28px rgba(0,0,0,.18); }
+  #back-dim {
+    position: fixed; inset: 0; background: #000;
+    opacity: 0; z-index: 0; pointer-events: none;
+  }
 
   /* ---------- Header ---------- */
   header {
@@ -81,6 +89,12 @@
   }
   .swipe-bg.edit { background: var(--primary); justify-content: flex-start; padding-left: 26px; }
   .swipe-bg.del { background: var(--red); justify-content: flex-end; padding-right: 26px; }
+  .swipe-bg span { transition: transform .16s ease-out; display: inline-block; }
+  .swipe-bg.armed span { transform: scale(1.8); }
+  .swipe-wrap.tight { margin-bottom: 10px; }
+  .swipe-wrap .term-row { margin-bottom: 0; position: relative; z-index: 1; }
+  .swipe-wrap.tight .swipe-bg { border-radius: 12px; }
+  .menu-raise { position: relative; z-index: 60; }
   .dot-btn {
     background: none; border: none; cursor: pointer;
     font-size: 22px; font-weight: 700; color: var(--muted);
@@ -349,12 +363,12 @@
   #navbar {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
     background: var(--card); border-top: 1.5px solid var(--border);
-    display: flex; padding-bottom: env(safe-area-inset-bottom);
+    display: flex; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
     box-shadow: 0 -2px 12px rgba(40,46,62,.06);
   }
   .nav-item {
     flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-    padding: 10px 0 8px; background: none; border: none; cursor: pointer;
+    padding: 12px 0 8px; background: none; border: none; cursor: pointer;
     color: var(--muted); font-size: 11px; font-weight: 700; font-family: inherit;
   }
   .nav-item .nicon { font-size: 22px; line-height: 1; }
@@ -379,6 +393,63 @@
     body.nav-visible header { display: none; }
   }
 
+  /* ---------- Splash / loading ---------- */
+  .splash {
+    min-height: 75vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+  }
+  .splash-logo {
+    width: 96px; height: 96px; border-radius: 24px;
+    background: var(--primary); color: #ffffff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 34px; font-weight: 800;
+    box-shadow: 0 10px 26px rgba(66,85,255,.35);
+    animation: splashPop .5s ease-out;
+  }
+  .splash-logo .sep { opacity: .45; font-weight: 400; }
+  .splash-logo .zh { color: #b7f5d8; }
+  @keyframes splashPop { from { transform: scale(.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .splash-name { font-size: 24px; font-weight: 800; color: var(--primary); letter-spacing: -.5px; }
+  .splash-name span { color: var(--text); }
+  .spinner {
+    width: 28px; height: 28px; margin-top: 6px;
+    border: 3.5px solid var(--border); border-top-color: var(--primary);
+    border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .splash-text { font-size: 14px; color: var(--muted); font-weight: 600; }
+  .splash-slow {
+    font-size: 13px; color: var(--muted); opacity: 0;
+    animation: slowIn .4s ease-out 6s forwards;
+  }
+  @keyframes slowIn { to { opacity: 1; } }
+
+  /* ---------- Danger dialog ---------- */
+  #dialog {
+    position: fixed; inset: 0; z-index: 100; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(20,23,35,.45); padding: 24px;
+  }
+  #dialog.open { display: flex; }
+  .dialog-card {
+    background: #ffffff; border-radius: 20px; padding: 26px 22px;
+    max-width: 360px; width: 100%; text-align: center;
+    box-shadow: 0 20px 50px rgba(0,0,0,.28);
+    animation: dialogIn .18s ease-out;
+  }
+  @keyframes dialogIn { from { transform: scale(.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .dialog-icon {
+    width: 58px; height: 58px; margin: 0 auto 14px; border-radius: 50%;
+    background: #ffe9ec; font-size: 26px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dialog-title { font-size: 19px; font-weight: 800; margin-bottom: 8px; color: var(--text); }
+  .dialog-msg { font-size: 14px; color: var(--muted); line-height: 1.55; margin-bottom: 20px; word-break: break-word; }
+  .dialog-msg strong { color: var(--text); }
+  .dialog-actions { display: flex; gap: 10px; }
+  .dialog-actions .btn { flex: 1; }
+  .btn.danger-solid { background: var(--red); color: #ffffff; }
+
   /* ---------- Toast ---------- */
   #toast {
     position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(80px);
@@ -390,7 +461,17 @@
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="back-dim"></div>
+<div id="app">
+  <div class="splash">
+    <div class="splash-logo">A<span class="sep">｜</span><span class="zh">文</span></div>
+    <div class="splash-name">Study<span>Cards</span></div>
+    <div class="spinner"></div>
+    <div class="splash-text">Loading your study sets…</div>
+    <div class="splash-slow">Taking longer than usual — check your internet connection</div>
+  </div>
+</div>
+<div id="dialog" onclick="if(event.target===this)closeDialog()"></div>
 <nav id="navbar"></nav>
 <div id="toast"></div>
 
@@ -925,8 +1006,8 @@ function renderHome() {
     for (const s of sets) {
       html += `
         <div class="swipe-wrap">
-        <div class="swipe-bg edit">✎</div>
-        <div class="swipe-bg del">🗑</div>
+        <div class="swipe-bg edit"><span>✎</span></div>
+        <div class="swipe-bg del"><span>🗑</span></div>
         <div class="set-card" data-id="${s.id}" onclick="openSetCard('${s.id}')">
           <div>
             <h3>${esc(s.title)}</h3>
@@ -966,7 +1047,10 @@ function onCardTouchStart(e) {
   const wrap = el.closest('.swipe-wrap');
   const bgEdit = wrap && wrap.querySelector('.swipe-bg.edit');
   const bgDel = wrap && wrap.querySelector('.swipe-bg.del');
-  const sw = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, active: false, dx: 0 };
+  const sw = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, active: false, dx: 0, armed: false };
+  const cardW = () => el.offsetWidth || window.innerWidth;
+  // delete is destructive — require a much longer swipe (2/3 of the card width)
+  const isTriggered = dx => dx > 0 ? dx > Math.min(140, cardW() * 0.3) : -dx > cardW() * (2 / 3);
   const onMove = ev => {
     if (suppressCardClick && !sw.active) { finish(false); return; } // long-press reorder took over
     const t = ev.touches[0];
@@ -980,6 +1064,15 @@ function onCardTouchStart(e) {
     el.style.transform = `translateX(${dx}px)`;
     if (bgEdit) bgEdit.style.visibility = dx > 0 ? 'visible' : 'hidden';
     if (bgDel) bgDel.style.visibility = dx < 0 ? 'visible' : 'hidden';
+    // past the trigger point: grow the icon + haptic pulse so the user knows what will happen
+    const armed = isTriggered(dx);
+    if (armed !== sw.armed) {
+      sw.armed = armed;
+      if (navigator.vibrate) navigator.vibrate(armed ? 40 : 15);
+      const bg = dx > 0 ? bgEdit : bgDel;
+      if (bgEdit) bgEdit.classList.toggle('armed', armed && dx > 0);
+      if (bgDel) bgDel.classList.toggle('armed', armed && dx < 0);
+    }
   };
   const onEnd = () => finish(true);
   function finish(fromUp) {
@@ -987,17 +1080,13 @@ function onCardTouchStart(e) {
     el.removeEventListener('touchend', onEnd);
     el.removeEventListener('touchcancel', onEnd);
     const dx = sw.dx;
-    const cardW = el.offsetWidth || window.innerWidth;
-    // delete is destructive — require a much longer swipe (2/3 of the card width)
-    const trigger = sw.active && (dx > 0
-      ? dx > Math.min(140, cardW * 0.3)
-      : -dx > cardW * (2 / 3));
+    const trigger = sw.active && isTriggered(dx);
     el.style.transition = 'transform .18s';
     el.style.transform = '';
     setTimeout(() => {
       el.style.transition = '';
-      if (bgEdit) bgEdit.style.visibility = 'hidden';
-      if (bgDel) bgDel.style.visibility = 'hidden';
+      if (bgEdit) { bgEdit.style.visibility = 'hidden'; bgEdit.classList.remove('armed'); }
+      if (bgDel) { bgDel.style.visibility = 'hidden'; bgDel.classList.remove('armed'); }
     }, 200);
     if (sw.active) { suppressCardClick = true; setTimeout(() => { suppressCardClick = false; }, 300); }
     if (fromUp && trigger) {
@@ -1187,7 +1276,10 @@ function applyTermView(setId) {
         </div>`;
     } else {
       html += `
-        <div class="term-row">
+        <div class="swipe-wrap tight">
+        <div class="swipe-bg edit"><span>✎</span></div>
+        <div class="swipe-bg del"><span>🗑</span></div>
+        <div class="term-row" data-idx="${i}" data-set="${s.id}">
           <div class="term">${esc(c.term)}${(c.misses || 0) > 0 ? ` <span style="font-size:11px;color:var(--red);font-weight:700">×${c.misses}</span>` : ''}</div>
           <div class="def">${esc(c.def)}</div>
           <button class="icon-btn" title="Edit this card" onclick="go('set',{setId:'${s.id}',editIdx:${i}})">✏️</button>
@@ -1195,6 +1287,7 @@ function applyTermView(setId) {
           ${c.example ? `
           <button class="ex-toggle" onclick="toggleExample(this)">Sentence ▾</button>
           <div class="row-example" style="display:none">${esc(c.example)} ${speakBtn(c.example)}</div>` : ''}
+        </div>
         </div>`;
     }
   }
@@ -1204,7 +1297,79 @@ function applyTermView(setId) {
       : `<div class="empty-list">No cards match this filter.</div>`;
   }
   list.innerHTML = html;
+  initTermSwipe();
   if (typeof state.editIdx === 'number') { const el = document.getElementById('row-term'); if (el) el.focus(); }
+}
+function deleteCard(setId, i) {
+  const s = getSet(setId);
+  if (!s || !s.cards[i]) return;
+  showDangerDialog('🗑', 'Delete word?',
+    `Are you sure you want to delete <strong>${esc(s.cards[i].term)}</strong>?<br>This cannot be undone.`,
+    'Delete', () => {
+      s.cards.splice(i, 1);
+      saveSets();
+      toast('Word deleted');
+      go('set', { setId });
+    });
+}
+/* Swipe gestures on term rows: right = edit, left = delete */
+function initTermSwipe() {
+  document.querySelectorAll('#term-list .term-row[data-idx]').forEach(el => {
+    el.addEventListener('touchstart', onTermTouchStart, { passive: true });
+  });
+}
+function onTermTouchStart(e) {
+  if (e.touches.length !== 1) return;
+  const el = e.currentTarget;
+  const wrap = el.closest('.swipe-wrap');
+  const bgEdit = wrap && wrap.querySelector('.swipe-bg.edit');
+  const bgDel = wrap && wrap.querySelector('.swipe-bg.del');
+  const sw = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, active: false, dx: 0, armed: false };
+  const rowW = () => el.offsetWidth || window.innerWidth;
+  const isTriggered = dx => dx > 0 ? dx > Math.min(140, rowW() * 0.3) : -dx > rowW() * (2 / 3);
+  const onMove = ev => {
+    const t = ev.touches[0];
+    const dx = t.clientX - sw.x0, dy = t.clientY - sw.y0;
+    if (!sw.active) {
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { finish(false); return; } // vertical scroll
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) sw.active = true;
+      else return;
+    }
+    sw.dx = dx;
+    el.style.transform = `translateX(${dx}px)`;
+    if (bgEdit) bgEdit.style.visibility = dx > 0 ? 'visible' : 'hidden';
+    if (bgDel) bgDel.style.visibility = dx < 0 ? 'visible' : 'hidden';
+    const armed = isTriggered(dx);
+    if (armed !== sw.armed) {
+      sw.armed = armed;
+      if (navigator.vibrate) navigator.vibrate(armed ? 40 : 15);
+      if (bgEdit) bgEdit.classList.toggle('armed', armed && dx > 0);
+      if (bgDel) bgDel.classList.toggle('armed', armed && dx < 0);
+    }
+  };
+  const onEnd = () => finish(true);
+  function finish(fromUp) {
+    el.removeEventListener('touchmove', onMove);
+    el.removeEventListener('touchend', onEnd);
+    el.removeEventListener('touchcancel', onEnd);
+    const dx = sw.dx;
+    const trigger = sw.active && isTriggered(dx);
+    el.style.transition = 'transform .18s';
+    el.style.transform = '';
+    setTimeout(() => {
+      el.style.transition = '';
+      if (bgEdit) { bgEdit.style.visibility = 'hidden'; bgEdit.classList.remove('armed'); }
+      if (bgDel) { bgDel.style.visibility = 'hidden'; bgDel.classList.remove('armed'); }
+    }, 200);
+    if (fromUp && trigger) {
+      const setId = el.dataset.set, i = +el.dataset.idx;
+      if (dx < 0) deleteCard(setId, i);
+      else go('set', { setId, editIdx: i });
+    }
+  }
+  el.addEventListener('touchmove', onMove, { passive: true });
+  el.addEventListener('touchend', onEnd);
+  el.addEventListener('touchcancel', onEnd);
 }
 function toggleClearBtn(input) {
   const btn = document.getElementById('term-clear');
@@ -1267,28 +1432,62 @@ function toggleDotMenu(id) {
   if (!menu) return;
   const wasOpen = menu.classList.contains('open');
   document.querySelectorAll('.dot-menu.open').forEach(m => m.classList.remove('open'));
-  if (!wasOpen) menu.classList.add('open');
+  document.querySelectorAll('.menu-raise').forEach(m => m.classList.remove('menu-raise'));
+  if (!wasOpen) {
+    menu.classList.add('open');
+    const wrap = menu.closest('.swipe-wrap');
+    if (wrap) wrap.classList.add('menu-raise'); // lift this card above its siblings
+  }
 }
 document.addEventListener('click', () => {
   document.querySelectorAll('.dot-menu.open').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.menu-raise').forEach(m => m.classList.remove('menu-raise'));
 });
 
+/* ----- Danger confirmation dialog ----- */
+function showDangerDialog(icon, title, messageHTML, confirmLabel, onConfirm) {
+  const overlay = document.getElementById('dialog');
+  overlay.innerHTML = `
+    <div class="dialog-card">
+      <div class="dialog-icon">${icon}</div>
+      <div class="dialog-title">${title}</div>
+      <div class="dialog-msg">${messageHTML}</div>
+      <div class="dialog-actions">
+        <button class="btn secondary" onclick="closeDialog()">Cancel</button>
+        <button class="btn danger-solid" id="dialog-confirm">${confirmLabel}</button>
+      </div>
+    </div>`;
+  overlay.classList.add('open');
+  document.getElementById('dialog-confirm').onclick = () => { closeDialog(); onConfirm(); };
+}
+function closeDialog() {
+  const overlay = document.getElementById('dialog');
+  overlay.classList.remove('open');
+  overlay.innerHTML = '';
+}
 function deleteSet(id) {
   const s = getSet(id);
-  if (s && s.shared) {
-    if (!confirm('Leave this shared set? Your study partner will keep it.')) return;
-    sharedRefs = sharedRefs.filter(c => c !== s.shared);
-    sets = sets.filter(x => x.id !== id);
-    saveSets();
-    toast('Left shared set');
-    go('home');
+  if (!s) return;
+  if (s.shared) {
+    showDangerDialog('🚪', 'Leave shared set?',
+      `Are you sure you want to leave <strong>${esc(s.title)}</strong>?<br>Your study partner will keep it.`,
+      'Leave', () => {
+        sharedRefs = sharedRefs.filter(c => c !== s.shared);
+        sets = sets.filter(x => x.id !== id);
+        saveSets();
+        toast('Left shared set');
+        go('home');
+      });
     return;
   }
-  if (!confirm('Delete this set? This cannot be undone.')) return;
-  sets = sets.filter(s => s.id !== id);
-  saveSets();
-  toast('Set deleted');
-  go('home');
+  showDangerDialog('🗑', 'Delete set?',
+    `Are you sure you want to delete <strong>${esc(s.title)}</strong>?<br>This cannot be undone.`,
+    'Delete', () => {
+      sets = sets.filter(x => x.id !== id);
+      saveSets();
+      toast('Set deleted');
+      go('home');
+    });
 }
 
 /* ----- Flashcards ----- */
@@ -1452,6 +1651,23 @@ function answerQuiz(idx) {
     else renderQuiz();
   }, correct ? 900 : 1600);
 }
+async function shareQuizResult() {
+  if (!qz) return;
+  const s = getSet(qz.setId);
+  const pct = Math.round((qz.score / qz.qs.length) * 100);
+  const grid = qz.qs.map(q => q.correct ? '✅' : (q.skipped ? '⬜' : '❌')).join('');
+  const text = `StudyCards Quiz — ${s ? s.title : ''}\n${pct}%  ${grid}\nStudy English with me → https://liangfromtaiwan.github.io/StudyCards/`;
+  if (navigator.share) {
+    try { await navigator.share({ text }); toast('Shared! 🎉'); return; }
+    catch (e) { if (e.name === 'AbortError') return; /* fall through to clipboard */ }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Result copied — paste it anywhere!');
+  } catch (e) {
+    prompt('Copy your result:', text);
+  }
+}
 function renderQuizResult() {
   const s = getSet(state.setId);
   if (!s || !qz) return go('home');
@@ -1464,6 +1680,7 @@ function renderQuizResult() {
       <p>You got ${qz.score} out of ${qz.qs.length} correct.<br>${msg}</p>
       <div class="result-actions">
         <button class="btn" onclick="startQuiz('${s.id}')">Retake quiz</button>
+        <button class="btn secondary" onclick="shareQuizResult()">📤 Share result</button>
         <button class="btn secondary" onclick="go('set',{setId:'${s.id}'})">Back to set</button>
       </div>
     </div>
@@ -1733,21 +1950,62 @@ document.addEventListener('touchmove', e => {
   const t = e.touches[0];
   const dx = t.clientX - edgeSwipe.x0;
   const dy = Math.abs(t.clientY - edgeSwipe.y0);
-  if (!edgeSwipe.active && dy > 60) { edgeSwipe = null; app.style.transform = ''; return; }
+  const dim = document.getElementById('back-dim');
+  if (!edgeSwipe.active && dy > 60) {
+    edgeSwipe = null;
+    app.style.transform = '';
+    app.classList.remove('swiping');
+    if (dim) dim.style.opacity = '0';
+    return;
+  }
   if (dx > 10) edgeSwipe.active = true;
-  if (edgeSwipe.active) app.style.transform = `translateX(${Math.max(0, dx)}px)`;
+  if (edgeSwipe.active) {
+    const x = Math.max(0, dx);
+    app.classList.add('swiping');
+    app.style.transform = `translateX(${x}px)`;
+    if (dim) dim.style.opacity = String(0.18 * Math.max(0, 1 - x / window.innerWidth));
+  }
 }, { passive: true });
 document.addEventListener('touchend', e => {
   if (!edgeSwipe) return;
   const dx = e.changedTouches[0].clientX - edgeSwipe.x0;
   const wasActive = edgeSwipe.active;
   edgeSwipe = null;
-  app.style.transition = 'transform .18s';
-  app.style.transform = '';
-  setTimeout(() => { app.style.transition = ''; }, 200);
-  if (wasActive && dx > 90) {
-    const back = backTarget();
-    if (back) back();
+  const dim = document.getElementById('back-dim');
+  const back = backTarget();
+  if (wasActive && dx > 90 && back) {
+    // 1) current page slides out to the right…
+    app.style.transition = 'transform .18s ease-out';
+    app.style.transform = 'translateX(100vw)';
+    setTimeout(() => {
+      // 2) …previous page comes in from the left, softly
+      app.style.transition = 'none';
+      back();
+      app.style.transform = 'translateX(-18%)';
+      app.style.opacity = '.8';
+      if (dim) dim.style.opacity = '.15';
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        app.style.transition = 'transform .22s ease-out, opacity .22s ease-out';
+        app.style.transform = '';
+        app.style.opacity = '';
+        if (dim) { dim.style.transition = 'opacity .22s ease-out'; dim.style.opacity = '0'; }
+        setTimeout(() => {
+          app.style.transition = '';
+          app.classList.remove('swiping');
+          if (dim) dim.style.transition = '';
+        }, 240);
+      }));
+    }, 185);
+  } else {
+    // not far enough — snap back
+    app.style.transition = 'transform .18s ease-out';
+    app.style.transform = '';
+    if (dim) { dim.style.transition = 'opacity .18s ease-out'; dim.style.opacity = '0'; }
+    setTimeout(() => {
+      app.style.transition = '';
+      app.classList.remove('swiping');
+      if (dim) dim.style.transition = '';
+    }, 200);
   }
 });
 
