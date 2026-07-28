@@ -1491,7 +1491,7 @@ function openEditor(setId) {
     // start with a fresh blank card on top, ready to type into
     ed = { id: setId, title: s.title, cards: [...s.cards.map(c => ({ ...c })), { term: '', def: '' }] };
   } else {
-    ed = { id: null, title: '', cards: [{ term: '', def: '' }, { term: '', def: '' }, { term: '', def: '' }] };
+    ed = { id: null, title: '', cards: [{ term: '', def: '' }] };
   }
   go('edit');
 }
