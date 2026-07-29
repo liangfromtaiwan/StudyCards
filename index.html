@@ -2001,11 +2001,37 @@ function cardEditHTML(c, i) {
         <div class="spell-hint" data-hint></div>
       </div>`;
 }
+const TATOEBA_LANG = { ja: 'jpn', ko: 'kor', es: 'spa', fr: 'fra', de: 'deu', vi: 'vie', th: 'tha', id: 'ind', 'zh-TW': 'cmn', 'zh-CN': 'cmn' };
 async function suggestExample(btn, i) {
   if (!ed || !ed.cards[i]) return;
-  if (LEARN_LANG !== 'en') { toast('Example suggestions are only available for English'); return; }
   const term = (ed.cards[i].term || '').trim();
-  if (!term) { toast('Type the English term first'); return; }
+  if (!term) { toast('Type the term first'); return; }
+  // Non-English learning languages: real example sentences from Tatoeba
+  if (LEARN_LANG !== 'en') {
+    const code = TATOEBA_LANG[LEARN_LANG];
+    if (!code) { toast('Example suggestions not available for this language'); return; }
+    btn.disabled = true; btn.textContent = '…';
+    let tex = null;
+    try {
+      const r = await fetch('https://api.tatoeba.org/unstable/sentences?lang=' + code + '&q=' + encodeURIComponent(term) + '&sort=relevance');
+      if (r.ok) {
+        const j = await r.json();
+        const cands = (j.data || []).map(d => d.text)
+          .filter(t => t && t.includes(term) && t.length >= term.length + 2 && t.length <= 90);
+        tex = cands[0] || null;
+      }
+    } catch (e) { /* fall through */ }
+    btn.disabled = false; btn.textContent = '✨';
+    if (tex) {
+      const input = btn.previousElementSibling;
+      input.value = tex;
+      ed.cards[i].example = tex;
+      ensureTrailingBlank(i);
+    } else {
+      toast('No example found for this word — try writing your own');
+    }
+    return;
+  }
   btn.disabled = true; btn.textContent = '…';
   const lookups = [term.toLowerCase()];
   if (term.includes(' ')) {
