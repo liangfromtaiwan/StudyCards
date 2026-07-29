@@ -324,19 +324,27 @@
   .icon-btn.save { color: var(--green); font-weight: 800; }
   /* folder-tab style toolbar, attached to the card's top-right corner */
   .edit-toolbar {
-    position: absolute; top: -42px; right: 0; z-index: 70;
-    display: flex; align-items: stretch; gap: 0; margin: 0;
+    position: absolute; top: -41.5px; right: -1.5px; z-index: 70;
+    display: flex; align-items: center; gap: 0; margin: 0;
     height: 42px;
-    background: var(--card);
+    background: #f7f9ff;
+    border: 1.5px solid #b9c4ff; border-bottom: none;
     border-radius: 14px 14px 0 0;
-    box-shadow: 0 -5px 12px rgba(40,46,62,.12);
-    overflow: hidden;
+    box-shadow: 0 -5px 12px rgba(40,46,62,.10);
   }
+  /* covers the card's top border under the tab so the two shapes merge,
+     and continues the right border line down to the card */
+  .edit-toolbar::after {
+    content: ''; position: absolute; left: 0; right: -1.5px; bottom: -4px; height: 6px;
+    background: #f7f9ff;
+    border-right: 1.5px solid #b9c4ff;
+  }
+  .pill-btn { height: 100%; }
   .pill-btn {
     border: none; border-radius: 0;
     padding: 0 16px;
     font-size: 14px; font-weight: 700; font-family: inherit;
-    background: var(--card); color: var(--text);
+    background: transparent; color: var(--text);
     cursor: pointer; box-shadow: none;
   }
   .pill-btn:active { opacity: .7; }
@@ -345,9 +353,11 @@
   .pill-btn.danger { color: var(--red); }
   .term-row.editing {
     gap: 8px; align-items: flex-start; position: relative; z-index: 65;
+    background: #f7f9ff;
+    border: 1.5px solid #b9c4ff;
     border-top-right-radius: 0; /* merge seamlessly with the folder tab */
   }
-  .term-row.editing input { min-width: 0; padding: 9px 10px; font-size: 14px; width: 100%; }
+  .term-row.editing input { min-width: 0; padding: 9px 10px; font-size: 14px; width: 100%; background: #ffffff; }
   .edit-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   .edit-line { display: flex; gap: 8px; }
   .edit-line input { flex: 1; }
