@@ -617,6 +617,7 @@ function setLearnLang(l) {
   toast('Learning language updated');
 }
 const learnLangName = () => (LEARN_LANGS.find(x => x[0] === LEARN_LANG) || ['', 'English'])[1];
+const appLangName = () => (LANGS.find(x => x[0] === APP_LANG) || ['', '繁體中文'])[1];
 const termLang = () => LEARN_LANG === 'en' ? '' : LEARN_LANG; // '' lets English use real recordings
 saveSets();
 
@@ -1332,8 +1333,8 @@ function applyTermView(setId) {
         <div class="term-row editing">
           <div class="edit-fields">
             <div class="edit-line">
-              <input type="text" id="row-term" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" placeholder="Term">
-              <input type="text" id="row-def" value="${esc(c.def)}" placeholder="Definition">
+              <input type="text" id="row-term" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" placeholder="Term (${learnLangName()})">
+              <input type="text" id="row-def" value="${esc(c.def)}" placeholder="Definition (${appLangName()})">
             </div>
             <input type="text" id="row-ex" spellcheck="true" value="${esc(c.example || '')}" placeholder="Example sentence (optional)">
           </div>
@@ -1991,7 +1992,7 @@ function cardEditHTML(c, i) {
         <div class="num">CARD ${i + 1}</div>
         <div class="pair">
           <input type="text" placeholder="Term (${learnLangName()})" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" oninput="ed.cards[${i}].term=this.value; autoTranslate(this, ${i}); ensureTrailingBlank(${i})">
-          <input type="text" placeholder="Definition" value="${esc(c.def)}" oninput="ed.cards[${i}].def=this.value; this.dataset.manual=this.value.trim()?'1':''; ensureTrailingBlank(${i})">
+          <input type="text" placeholder="Definition (${appLangName()})" value="${esc(c.def)}" oninput="ed.cards[${i}].def=this.value; this.dataset.manual=this.value.trim()?'1':''; ensureTrailingBlank(${i})">
         </div>
         <div class="ex-row">
           <input type="text" placeholder="Example sentence (optional)" spellcheck="true" value="${esc(c.example || '')}" oninput="ed.cards[${i}].example=this.value; ensureTrailingBlank(${i})">
