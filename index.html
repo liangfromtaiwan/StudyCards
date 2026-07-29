@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="color-scheme" content="light">
 <meta name="apple-mobile-web-app-title" content="StudyCards">
 <meta name="theme-color" content="#f6f7fb">
 <link rel="manifest" href="manifest.json">
@@ -34,7 +35,8 @@
     min-height: 100vh;
   }
   #app {
-    max-width: 640px; margin: 0 auto; padding: 20px 16px 100px;
+    max-width: 640px; margin: 0 auto;
+    padding: calc(env(safe-area-inset-top, 0px) + 20px) 16px 100px;
     position: relative; z-index: 1; background: var(--bg); min-height: 100vh;
   }
   #app.swiping { box-shadow: -10px 0 28px rgba(0,0,0,.18); }
@@ -47,7 +49,20 @@
     background: var(--bg); display: none; overflow: hidden;
     pointer-events: none;
   }
-  #ghost-app { max-width: 640px; margin: 0 auto; padding: 20px 16px 100px; }
+  #ghost-app { max-width: 640px; margin: 0 auto; padding: calc(env(safe-area-inset-top, 0px) + 20px) 16px 100px; }
+  #status-bar-bg {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 45;
+    height: env(safe-area-inset-top, 0px); background: var(--bg);
+  }
+  .sticky-head {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+    background: var(--bg);
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 8px 0 10px; margin-bottom: 10px;
+  }
+  @media (min-width: 700px) {
+    body.nav-visible .sticky-head { top: 56px; }
+  }
 
   /* ---------- Header ---------- */
   header {
@@ -115,7 +130,15 @@
     font-size: 22px; font-weight: 700; color: var(--muted);
     padding: 4px 12px; border-radius: 8px; line-height: 1; flex-shrink: 0;
   }
-  .dot-btn:hover { background: #eef0ff; color: var(--primary); }
+  .dot-btn:focus, .dot-btn:focus-visible, .dot-btn:active {
+    outline: none; background: transparent; color: var(--muted);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .dot-btn:hover { background: #eef0ff; color: var(--primary); }
+  }
+  .dot-btn.menu-open, .dot-btn.menu-open:focus, .dot-btn.menu-open:active {
+    background: #eef0ff; color: var(--primary);
+  }
   .dot-menu {
     position: absolute; right: 14px; top: 58px; z-index: 20;
     background: var(--card); border: 1.5px solid var(--border); border-radius: 12px;
@@ -347,7 +370,7 @@
     font-size: 13px; font-weight: 700; padding: 7px 14px; border-radius: 999px;
     cursor: pointer; transition: all .15s;
   }
-  .chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .chip.active { background: #dfe5ff; border-color: #dfe5ff; color: var(--primary); }
   .empty-list { text-align: center; color: var(--muted); padding: 28px 12px; font-size: 15px; }
   .empty-list .btn { margin-top: 12px; }
 
@@ -476,6 +499,7 @@
 </style>
 </head>
 <body>
+<div id="status-bar-bg"></div>
 <div id="page-under"><div id="ghost-app"></div></div>
 <div id="back-dim"></div>
 <div id="app">
@@ -1209,7 +1233,10 @@ function renderSet() {
   const canQuiz = s.cards.length >= 2;
   let html = `
     <div class="back" onclick="go('home')">← All sets</div>
-    <div class="set-title">${esc(s.title)}</div>
+    <div class="sticky-head" style="align-items:center;">
+      <div class="set-title" style="margin-bottom:0">${esc(s.title)}</div>
+      <button class="btn small" style="flex-shrink:0" onclick="openEditor('${s.id}')">✎ Edit set</button>
+    </div>
     <div class="set-sub">${s.cards.length} terms</div>
     <div class="mode-grid">
       <div class="mode-btn" onclick="startFlashcards('${s.id}')">
@@ -1220,7 +1247,6 @@ function renderSet() {
       </div>
     </div>
     <div style="display:flex; gap:10px; margin-bottom:24px; flex-wrap:wrap;">
-      <button class="btn secondary small" onclick="openEditor('${s.id}')">✎ Edit set</button>
       ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="shareSet('${s.id}')">${s.shared ? '👥 ' + fmtCode(s.shared) : '🔗 Share'}</button>` : ''}
       <button class="btn danger small" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
     </div>
@@ -1453,22 +1479,27 @@ function saveCardRow(setId, i) {
   go('set', { setId });
 }
 
+function closeAllDotMenus() {
+  document.querySelectorAll('.dot-menu.open').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.menu-raise').forEach(m => m.classList.remove('menu-raise'));
+  document.querySelectorAll('.dot-btn.menu-open').forEach(b => { b.classList.remove('menu-open'); b.blur(); });
+}
 function toggleDotMenu(id) {
   const menu = document.getElementById('menu-' + id);
   if (!menu) return;
   const wasOpen = menu.classList.contains('open');
-  document.querySelectorAll('.dot-menu.open').forEach(m => m.classList.remove('open'));
-  document.querySelectorAll('.menu-raise').forEach(m => m.classList.remove('menu-raise'));
+  closeAllDotMenus();
   if (!wasOpen) {
     menu.classList.add('open');
     const wrap = menu.closest('.swipe-wrap');
-    if (wrap) wrap.classList.add('menu-raise'); // lift this card above its siblings
+    if (wrap) {
+      wrap.classList.add('menu-raise'); // lift this card above its siblings
+      const btn = wrap.querySelector('.dot-btn');
+      if (btn) btn.classList.add('menu-open');
+    }
   }
 }
-document.addEventListener('click', () => {
-  document.querySelectorAll('.dot-menu.open').forEach(m => m.classList.remove('open'));
-  document.querySelectorAll('.menu-raise').forEach(m => m.classList.remove('menu-raise'));
-});
+document.addEventListener('click', closeAllDotMenus);
 
 /* ----- Danger confirmation dialog ----- */
 function showDangerDialog(icon, title, messageHTML, confirmLabel, onConfirm) {
@@ -1821,9 +1852,9 @@ function renderEditor() {
   if (!ed) return go('home');
   let html = `
     <div class="back" onclick="cancelEdit()">← Cancel</div>
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px;">
+    <div class="sticky-head" style="align-items:center;">
       <div class="set-title" style="margin-bottom:0">${ed.id ? 'Edit set' : 'Create a new set'}</div>
-      <button class="btn small" onclick="saveEdit()">${ed.id ? 'Save changes' : 'Create set'}</button>
+      <button class="btn small" style="flex-shrink:0" onclick="saveEdit()">${ed.id ? 'Save changes' : 'Create set'}</button>
     </div>
     <div class="field">
       <label>Title</label>
@@ -2086,6 +2117,8 @@ document.addEventListener('touchmove', e => {
     app.classList.remove('swiping');
     if (dim) dim.style.opacity = '0';
     if (under) under.style.display = 'none';
+    const g0 = document.getElementById('ghost-app');
+    if (g0) g0.innerHTML = ''; // remove duplicate-id ghost content
     return;
   }
   if (dx > 10 && !edgeSwipe.active) {
@@ -2119,6 +2152,8 @@ document.addEventListener('touchend', e => {
     app.classList.remove('swiping');
     if (dim) { dim.style.transition = ''; dim.style.opacity = '0'; }
     if (under) { under.style.transition = ''; under.style.display = 'none'; }
+    const g = document.getElementById('ghost-app');
+    if (g) g.innerHTML = ''; // remove duplicate-id ghost content
   };
   if (wasActive && dx > 90 && back) {
     // commit: current page slides fully out while the real previous page settles into place
