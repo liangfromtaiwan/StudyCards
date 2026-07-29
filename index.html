@@ -606,6 +606,18 @@ function setAppLang(l) {
   if (user && db) db.collection('users').doc(user.uid).set({ lang: l }, { merge: true }).catch(() => {});
   toast('Translation language updated');
 }
+/* Learning (source) language: what you type and study */
+const LEARN_LANGS = [['en', 'English'], ...LANGS];
+let LEARN_LANG = 'en';
+try { LEARN_LANG = localStorage.getItem('studycards.learnLang') || 'en'; } catch (e) {}
+function setLearnLang(l) {
+  LEARN_LANG = l;
+  try { localStorage.setItem('studycards.learnLang', l); } catch (e) {}
+  if (user && db) db.collection('users').doc(user.uid).set({ learnLang: l }, { merge: true }).catch(() => {});
+  toast('Learning language updated');
+}
+const learnLangName = () => (LEARN_LANGS.find(x => x[0] === LEARN_LANG) || ['', 'English'])[1];
+const termLang = () => LEARN_LANG === 'en' ? '' : LEARN_LANG; // '' lets English use real recordings
 saveSets();
 
 /* =====================  State & helpers  ===================== */
@@ -730,10 +742,10 @@ function speakBtn(text, lang = '') {
 }
 
 /* =====================  Auto-translate (EN → 繁體中文)  ===================== */
-async function translateEn2Zh(text) { // translates to the user's chosen language (APP_LANG)
+async function translateEn2Zh(text) { // learning language (LEARN_LANG) → native language (APP_LANG)
   // Primary: Google Translate public endpoint
   try {
-    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=' + encodeURIComponent(APP_LANG) + '&dt=t&q=' + encodeURIComponent(text);
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=' + encodeURIComponent(LEARN_LANG) + '&tl=' + encodeURIComponent(APP_LANG) + '&dt=t&q=' + encodeURIComponent(text);
     const r = await fetch(url);
     if (r.ok) {
       const j = await r.json();
@@ -742,7 +754,7 @@ async function translateEn2Zh(text) { // translates to the user's chosen languag
     }
   } catch (e) { /* fall through */ }
   // Fallback: MyMemory
-  const r2 = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|' + encodeURIComponent(APP_LANG));
+  const r2 = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=' + encodeURIComponent(LEARN_LANG) + '|' + encodeURIComponent(APP_LANG));
   const j2 = await r2.json();
   const out2 = j2 && j2.responseData && j2.responseData.translatedText;
   if (!out2) throw new Error('no translation');
@@ -754,6 +766,7 @@ async function checkSpelling(termInput, i, text) {
   const hint = termInput.closest('.card-edit') && termInput.closest('.card-edit').querySelector('[data-hint]');
   if (!hint) return;
   hint.innerHTML = '';
+  if (LEARN_LANG !== 'en') return; // dictionary spell check is English-only
   if (!/^[A-Za-z]+$/.test(text) || text.length < 3) return; // single words only
   try {
     const r = await fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(text) + '&max=1');
@@ -779,7 +792,8 @@ function applySpell(el, i) {
 function autoTranslate(termInput, i) {
   clearTimeout(termInput._t);
   const text = termInput.value.trim();
-  if (!text || !/[a-zA-Z]/.test(text)) return;
+  if (!text) return;
+  if (LEARN_LANG === 'en' && !/[a-zA-Z]/.test(text)) return;
   termInput._t = setTimeout(async () => {
     checkSpelling(termInput, i, text);
     const defInput = termInput.nextElementSibling;
@@ -859,16 +873,22 @@ function renderAccount() {
       <button class="btn full" onclick="go('login')">Sign in</button>`;
   }
   const langOptions = LANGS.map(([code, name]) => `<option value="${code}">${name}</option>`).join('');
+  const learnOptions = LEARN_LANGS.map(([code, name]) => `<option value="${code}">${name}</option>`).join('');
   app.innerHTML = `
     <header><div class="logo" onclick="go('home')">Study<span>Cards</span></div></header>
     <div class="auth-card">${inner}</div>
     <div class="auth-card" style="margin-top:16px;">
-      <h2 style="font-size:18px;">My language</h2>
+      <h2 style="font-size:18px;">Learning language</h2>
+      <div class="auth-sub">The language you're studying — type words in this language.</div>
+      <select id="learn-sel" class="lang-select" onchange="setLearnLang(this.value)">${learnOptions}</select>
+      <h2 style="font-size:18px; margin-top:24px;">My language</h2>
       <div class="auth-sub">New words are automatically translated into this language.</div>
       <select id="lang-sel" class="lang-select" onchange="setAppLang(this.value)">${langOptions}</select>
     </div>`;
   const sel = document.getElementById('lang-sel');
   if (sel) sel.value = APP_LANG;
+  const lsel = document.getElementById('learn-sel');
+  if (lsel) lsel.value = LEARN_LANG;
 }
 
 /* ----- Login ----- */
@@ -951,6 +971,10 @@ async function loadCloudSets() {
     if (data && data.lang) {
       APP_LANG = data.lang;
       try { localStorage.setItem('studycards.lang', data.lang); } catch (e) {}
+    }
+    if (data && data.learnLang) {
+      LEARN_LANG = data.learnLang;
+      try { localStorage.setItem('studycards.learnLang', data.learnLang); } catch (e) {}
     }
     let own;
     if (data && Array.isArray(data.sets)) {
@@ -1325,10 +1349,10 @@ function applyTermView(setId) {
           <div class="term">${esc(c.term)}${(c.misses || 0) > 0 ? ` <span style="font-size:11px;color:var(--red);font-weight:700">×${c.misses}</span>` : ''}</div>
           <div class="def">${esc(c.def)}</div>
           <button class="icon-btn" title="Edit this card" onclick="go('set',{setId:'${s.id}',editIdx:${i}})">✏️</button>
-          ${speakBtn(c.term)}
+          ${speakBtn(c.term, termLang())}
           ${c.example ? `
           <button class="ex-toggle" onclick="toggleExample(this)">Sentence ▾</button>
-          <div class="row-example" style="display:none">${esc(c.example)} ${speakBtn(c.example)}</div>` : ''}
+          <div class="row-example" style="display:none">${esc(c.example)} ${speakBtn(c.example, termLang())}</div>` : ''}
         </div>
         </div>`;
     }
@@ -1567,8 +1591,8 @@ function renderFlashcards() {
     </div>
     <div class="flip-scene">
       <div class="flip-card ${fc.flipped ? 'flipped' : ''}" onclick="flipFc()">
-        <div class="flip-face"><div class="hint">Term</div>${speakBtn(card.term)}${esc(card.term)}</div>
-        <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def, APP_LANG)}<div>${esc(card.def)}${card.example ? `<div class="fc-example">${esc(card.example)} ${speakBtn(card.example)}</div>` : ''}</div></div>
+        <div class="flip-face"><div class="hint">Term</div>${speakBtn(card.term, termLang())}${esc(card.term)}</div>
+        <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def, APP_LANG)}<div>${esc(card.def)}${card.example ? `<div class="fc-example">${esc(card.example)} ${speakBtn(card.example, termLang())}</div>` : ''}</div></div>
       </div>
     </div>
     <div class="fc-controls">
@@ -1635,7 +1659,7 @@ function renderQuiz() {
     <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>
     <div class="quiz-q">
       <div class="qlabel">What is the definition of…</div>
-      <div class="qtext-row"><div class="qtext">${esc(q.term)}</div>${speakBtn(q.term)}</div>
+      <div class="qtext-row"><div class="qtext">${esc(q.term)}</div>${speakBtn(q.term, termLang())}</div>
     </div>
     <div class="feedback" id="fb"></div>
     <div id="choices">`;
@@ -1966,7 +1990,7 @@ function cardEditHTML(c, i) {
         <button class="remove" title="Remove card" onclick="removeCard(${i})">✕</button>
         <div class="num">CARD ${i + 1}</div>
         <div class="pair">
-          <input type="text" placeholder="Term (English)" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" oninput="ed.cards[${i}].term=this.value; autoTranslate(this, ${i}); ensureTrailingBlank(${i})">
+          <input type="text" placeholder="Term (${learnLangName()})" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" oninput="ed.cards[${i}].term=this.value; autoTranslate(this, ${i}); ensureTrailingBlank(${i})">
           <input type="text" placeholder="Definition" value="${esc(c.def)}" oninput="ed.cards[${i}].def=this.value; this.dataset.manual=this.value.trim()?'1':''; ensureTrailingBlank(${i})">
         </div>
         <div class="ex-row">
@@ -1978,6 +2002,7 @@ function cardEditHTML(c, i) {
 }
 async function suggestExample(btn, i) {
   if (!ed || !ed.cards[i]) return;
+  if (LEARN_LANG !== 'en') { toast('Example suggestions are only available for English'); return; }
   const term = (ed.cards[i].term || '').trim();
   if (!term) { toast('Type the English term first'); return; }
   btn.disabled = true; btn.textContent = '…';
