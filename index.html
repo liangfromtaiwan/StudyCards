@@ -1024,7 +1024,7 @@ async function loadCloudSets() {
         const d = await db.collection('sharedSets').doc(code).get();
         if (d.exists) {
           const sd = d.data();
-          shared.push({ id: 'shared-' + code, shared: code, title: sd.title, cards: sd.cards || [] });
+          shared.push({ id: 'shared-' + code, shared: code, owner: sd.createdBy, title: sd.title, cards: sd.cards || [] });
         }
       } catch (e) { /* skip unreachable shared set */ }
     }
@@ -1061,6 +1061,28 @@ async function shareSet(setId) {
     showShareCode(code);
   } catch (e) { toast('Could not share: ' + e.message); }
 }
+async function unshareSet(id) {
+  const s = getSet(id);
+  if (!s || !s.shared || !user) return;
+  showDangerDialog('🔒', 'Stop sharing?',
+    `<strong>${esc(s.title)}</strong> will become private again.<br>Your study partner will lose access to it.`,
+    'Unshare', async () => {
+      const code = s.shared;
+      try {
+        await db.collection('sharedSets').doc(code).delete();
+      } catch (e) {
+        toast('Only the person who shared this set can unshare it');
+        return;
+      }
+      sharedRefs = sharedRefs.filter(c => c !== code);
+      delete s.shared;
+      delete s.owner;
+      s.id = uid();
+      saveSets();
+      toast('Set is private again');
+      go('set', { setId: s.id });
+    });
+}
 function showShareCode(code) {
   const disp = fmtCode(code);
   if (navigator.clipboard) navigator.clipboard.writeText(disp).catch(() => {});
@@ -1078,7 +1100,7 @@ async function joinSet() {
     if (!d.exists) { toast('No set found with that code'); return; }
     const sd = d.data();
     sharedRefs.push(code);
-    sets.unshift({ id: 'shared-' + code, shared: code, title: sd.title, cards: sd.cards || [] });
+    sets.unshift({ id: 'shared-' + code, shared: code, owner: sd.createdBy, title: sd.title, cards: sd.cards || [] });
     saveSets();
     toast('Joined "' + sd.title + '"');
     render();
@@ -1285,6 +1307,7 @@ function renderSet() {
       const changed = JSON.stringify({ t: s.title, c: s.cards }) !== JSON.stringify({ t: sd.title, c: sd.cards || [] });
       s.title = sd.title;
       s.cards = sd.cards || [];
+      s.owner = sd.createdBy;
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) {}
       if (changed && state.view === 'set' && state.setId === s.id) renderSet();
     }).catch(() => {});
@@ -1307,6 +1330,7 @@ function renderSet() {
     </div>
     <div style="display:flex; gap:10px; margin-bottom:24px; flex-wrap:wrap;">
       ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="shareSet('${s.id}')">${s.shared ? '👥 ' + fmtCode(s.shared) : '🔗 Share'}</button>` : ''}
+      ${s.shared && user && (!s.owner || s.owner === user.uid) ? `<button class="btn secondary small" onclick="unshareSet('${s.id}')">🔒 Unshare</button>` : ''}
       <button class="btn danger small" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
     </div>
     <div class="section-title">Terms in this set</div>
