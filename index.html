@@ -322,7 +322,31 @@
   .icon-btn:hover { background: #eef0ff; color: var(--primary); }
   .icon-btn:active { transform: scale(.9); }
   .icon-btn.save { color: var(--green); font-weight: 800; }
-  .term-row.editing { gap: 8px; align-items: flex-start; }
+  /* folder-tab style toolbar, attached to the card's top-right corner */
+  .edit-toolbar {
+    position: absolute; top: -42px; right: 0; z-index: 70;
+    display: flex; align-items: stretch; gap: 0; margin: 0;
+    height: 42px;
+    background: var(--card);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -5px 12px rgba(40,46,62,.12);
+    overflow: hidden;
+  }
+  .pill-btn {
+    border: none; border-radius: 0;
+    padding: 0 16px;
+    font-size: 14px; font-weight: 700; font-family: inherit;
+    background: var(--card); color: var(--text);
+    cursor: pointer; box-shadow: none;
+  }
+  .pill-btn:active { opacity: .7; }
+  .pill-btn + .pill-btn { border-left: 1.5px solid var(--border); }
+  .pill-btn.primary { color: var(--green); }
+  .pill-btn.danger { color: var(--red); }
+  .term-row.editing {
+    gap: 8px; align-items: flex-start; position: relative; z-index: 65;
+    border-top-right-radius: 0; /* merge seamlessly with the folder tab */
+  }
   .term-row.editing input { min-width: 0; padding: 9px 10px; font-size: 14px; width: 100%; }
   .edit-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   .edit-line { display: flex; gap: 8px; }
@@ -1331,6 +1355,11 @@ function applyTermView(setId) {
     if (state.editIdx === i) {
       html += `
         <div class="term-row editing">
+          <div class="edit-toolbar">
+            <button class="pill-btn danger" onclick="deleteCard('${s.id}', ${i})">Delete</button>
+            <button class="pill-btn primary" onclick="saveCardRow('${s.id}', ${i})">✓ Save</button>
+            <button class="pill-btn" onclick="go('set',{setId:'${s.id}'})">× Close</button>
+          </div>
           <div class="edit-fields">
             <div class="edit-line">
               <input type="text" id="row-term" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" placeholder="Term (${learnLangName()})">
@@ -1338,8 +1367,6 @@ function applyTermView(setId) {
             </div>
             <input type="text" id="row-ex" spellcheck="true" value="${esc(c.example || '')}" placeholder="Example sentence (optional)">
           </div>
-          <button class="icon-btn save" title="Save" onclick="saveCardRow('${s.id}', ${i})">✓</button>
-          <button class="icon-btn" title="Cancel" onclick="go('set',{setId:'${s.id}'})">✕</button>
         </div>`;
     } else {
       html += `
