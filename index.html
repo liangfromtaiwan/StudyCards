@@ -428,6 +428,7 @@
     position: absolute; top: 4px; right: 4px; font-size: 22px; z-index: 2;
     min-width: 52px; min-height: 52px;
     display: inline-flex; align-items: center; justify-content: center;
+    backface-visibility: hidden; -webkit-backface-visibility: hidden; /* iOS: hide with its own face */
   }
   .qtext-row { display: flex; align-items: center; gap: 10px; }
 
@@ -1083,6 +1084,87 @@ async function unshareSet(id) {
       go('set', { setId: s.id });
     });
 }
+/* ----- Challenge mode: read-only quiz + leaderboard ----- */
+async function createChallenge(setId) {
+  if (!user) { toast('Sign in first to create a challenge'); return; }
+  const s = getSet(setId);
+  if (!s || s.cards.length < 2) { toast('Add at least 2 cards first'); return; }
+  if (s.challengeCode) { showChallengeCode(s.challengeCode); return; }
+  const code = genCode();
+  try {
+    await db.collection('challenges').doc(code).set({
+      title: s.title,
+      cards: s.cards.map(c => ({ term: c.term, def: c.def, ...(c.example ? { example: c.example } : {}) })),
+      createdBy: user.uid,
+      scores: {},
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    s.challengeCode = code;
+    saveSets();
+    showChallengeCode(code);
+    go('set', { setId });
+  } catch (e) { toast('Could not create challenge: ' + e.message); }
+}
+function showChallengeCode(code) {
+  const disp = fmtCode(code);
+  if (navigator.clipboard) navigator.clipboard.writeText(disp).catch(() => {});
+  prompt('Challenge code — friends tap "Join set" and enter it to take the quiz and compete:', disp);
+}
+function startChallenge(code, data) {
+  const cards = data.cards || [];
+  if (cards.length < 2) { toast('This challenge has no cards'); return; }
+  const qs = weightedSample(cards, QUIZ_MAX).map(card => {
+    const wrongPool = shuffle(cards.filter(c => c.def !== card.def)).slice(0, 3).map(c => c.def);
+    return { term: card.term, answer: card.def, example: card.example, choices: shuffle([card.def, ...wrongPool]) };
+  });
+  qz = { setId: null, qs, i: 0, score: 0, answered: false,
+         challenge: { code, title: data.title, cards, scores: data.scores || {} } };
+  go('quiz', {});
+}
+function retakeChallenge() {
+  const c = qz && qz.challenge;
+  if (c) startChallenge(c.code, { title: c.title, cards: c.cards, scores: c.scores });
+}
+function ensureDisplayName() {
+  let n = '';
+  try { n = localStorage.getItem('studycards.name') || ''; } catch (e) {}
+  if (!n) {
+    const def = user && user.email ? user.email.split('@')[0] : 'Player';
+    n = (prompt('Your name on the leaderboard:', def) || def).slice(0, 20);
+    try { localStorage.setItem('studycards.name', n); } catch (e) {}
+  }
+  return n;
+}
+async function submitChallengeScore() {
+  if (!user || !db || !qz || !qz.challenge) return;
+  const pct = Math.round((qz.score / qz.qs.length) * 100);
+  const name = ensureDisplayName();
+  const code = qz.challenge.code;
+  const entry = { name, pct, score: qz.score, total: qz.qs.length, at: Date.now() };
+  try {
+    const ref = db.collection('challenges').doc(code);
+    const snap = await ref.get();
+    const scores = (snap.exists && snap.data().scores) || {};
+    const prev = scores[user.uid];
+    const best = !prev || pct > prev.pct;
+    if (best) await ref.set({ scores: { [user.uid]: entry } }, { merge: true });
+    qz.challenge.scores = { ...scores, [user.uid]: best ? entry : prev };
+  } catch (e) { toast('Could not submit your score: ' + e.message); }
+  renderChallengeBoard();
+}
+function renderChallengeBoard() {
+  const el = document.getElementById('challenge-board');
+  if (!el || !qz || !qz.challenge) return;
+  const entries = Object.entries(qz.challenge.scores || {}).map(([u, v]) => ({ uid: u, ...v }));
+  entries.sort((a, b) => b.pct - a.pct || a.at - b.at);
+  el.innerHTML = entries.length
+    ? entries.map((e2, idx) => `
+      <div class="term-row" style="${user && e2.uid === user.uid ? 'border:1.5px solid var(--primary);' : ''}">
+        <div class="term">${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : (idx + 1) + '. '} ${esc(e2.name || 'Player')}</div>
+        <div class="def">${e2.pct}%（${e2.score}/${e2.total}）</div>
+      </div>`).join('')
+    : '<div class="empty-list">No scores yet — be the first!</div>';
+}
 function showShareCode(code) {
   const disp = fmtCode(code);
   if (navigator.clipboard) navigator.clipboard.writeText(disp).catch(() => {});
@@ -1097,7 +1179,13 @@ async function joinSet() {
   if (sharedRefs.includes(code)) { toast('You already joined this set'); return; }
   try {
     const d = await db.collection('sharedSets').doc(code).get();
-    if (!d.exists) { toast('No set found with that code'); return; }
+    if (!d.exists) {
+      // maybe it's a challenge code
+      const c = await db.collection('challenges').doc(code).get();
+      if (c.exists) { startChallenge(code, c.data()); return; }
+      toast('No set found with that code');
+      return;
+    }
     const sd = d.data();
     sharedRefs.push(code);
     sets.unshift({ id: 'shared-' + code, shared: code, owner: sd.createdBy, title: sd.title, cards: sd.cards || [] });
@@ -1331,6 +1419,7 @@ function renderSet() {
     <div style="display:flex; gap:10px; margin-bottom:24px; flex-wrap:wrap;">
       ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="shareSet('${s.id}')">${s.shared ? '👥 ' + fmtCode(s.shared) : '🔗 Share'}</button>` : ''}
       ${s.shared && user && (!s.owner || s.owner === user.uid) ? `<button class="btn secondary small" onclick="unshareSet('${s.id}')">🔒 Unshare</button>` : ''}
+      ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="createChallenge('${s.id}')">${s.challengeCode ? '🏆 ' + fmtCode(s.challengeCode) : '🏆 Challenge'}</button>` : ''}
       <button class="btn danger small" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
     </div>
     <div class="section-title">Terms in this set</div>
@@ -1399,7 +1488,10 @@ function applyTermView(setId) {
               <input type="text" id="row-term" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" placeholder="Term (${learnLangName()})">
               <input type="text" id="row-def" value="${esc(c.def)}" placeholder="Definition (${appLangName()})">
             </div>
-            <input type="text" id="row-ex" spellcheck="true" value="${esc(c.example || '')}" placeholder="Example sentence (optional)">
+            <div class="ex-row" style="margin-top:0;">
+              <input type="text" id="row-ex" spellcheck="true" value="${esc(c.example || '')}" placeholder="Example sentence (optional)">
+              <button class="btn secondary small suggest" title="Suggest an example" onclick="suggestExampleRow(this)">✨</button>
+            </div>
           </div>
         </div>`;
     } else {
@@ -1708,13 +1800,16 @@ function startQuiz(setId) {
   go('quiz', { setId });
 }
 function renderQuiz() {
-  const s = getSet(state.setId);
-  if (!s || !qz) return go('home');
+  if (!qz) return go('home');
+  const s = qz.challenge ? null : getSet(state.setId);
+  if (!s && !qz.challenge) return go('home');
+  const exitTo = qz.challenge ? `go('home')` : `go('set',{setId:'${s.id}'})`;
   const q = qz.qs[qz.i];
   const pct = (qz.i / qz.qs.length) * 100;
   let html = `
+    ${qz.challenge ? `<div class="section-title" style="margin-top:0;">🏆 ${esc(qz.challenge.title)}</div>` : ''}
     <div class="study-top">
-      <div class="back" onclick="go('set',{setId:'${s.id}'})" style="margin:0">✕ Exit</div>
+      <div class="back" onclick="${exitTo}" style="margin:0">✕ Exit</div>
       <div class="progress-text">Question ${qz.i + 1} / ${qz.qs.length}</div>
       <div style="width:60px"></div>
     </div>
@@ -1758,7 +1853,7 @@ function skipQuiz() {
   setTimeout(() => {
     qz.i++;
     qz.answered = false;
-    if (qz.i >= qz.qs.length) { saveSets(); go('quizResult', { setId: qz.setId }); }
+    if (qz.i >= qz.qs.length) finishQuiz();
     else renderQuiz();
   }, 1400);
 }
@@ -1790,9 +1885,14 @@ function answerQuiz(idx) {
   setTimeout(() => {
     qz.i++;
     qz.answered = false;
-    if (qz.i >= qz.qs.length) { saveSets(); go('quizResult', { setId: qz.setId }); }
+    if (qz.i >= qz.qs.length) finishQuiz();
     else renderQuiz();
   }, correct ? 900 : 1600);
+}
+function finishQuiz() {
+  if (qz.challenge) submitChallengeScore(); // async — leaderboard fills in on the result page
+  else saveSets();
+  go('quizResult', { setId: qz.setId });
 }
 /* Share the result as a picture: draw a scorecard on canvas, then share/download */
 function buildResultCanvas() {
@@ -1850,7 +1950,7 @@ function buildResultCanvas() {
   // set title
   ctx.fillStyle = '#282e3e';
   ctx.font = `800 46px ${FONT}`;
-  ctx.fillText((getSet(qz.setId) || {}).title || 'Quiz', PAD, 350);
+  ctx.fillText(qz.challenge ? qz.challenge.title : ((getSet(qz.setId) || {}).title || 'Quiz'), PAD, 350);
   // score
   ctx.fillStyle = '#4255ff';
   ctx.font = `800 130px ${FONT}`;
@@ -1891,21 +1991,30 @@ function shareQuizImage() {
   }, 'image/png');
 }
 function renderQuizResult() {
-  const s = getSet(state.setId);
-  if (!s || !qz) return go('home');
+  if (!qz) return go('home');
+  const s = qz.challenge ? null : getSet(state.setId);
+  if (!s && !qz.challenge) return go('home');
   const pct = Math.round((qz.score / qz.qs.length) * 100);
   const msg = pct === 100 ? 'Perfect score! 🏆' : pct >= 70 ? 'Nice work! 💪' : 'Keep practicing — you\'ll get there! 📖';
   let html = `
-    <div class="back" onclick="go('set',{setId:'${s.id}'})">← Back to set</div>
+    <div class="back" onclick="${qz.challenge ? `go('home')` : `go('set',{setId:'${s ? s.id : ''}'})`}">${qz.challenge ? '← Home' : '← Back to set'}</div>
+    ${qz.challenge ? `<div class="section-title" style="margin-top:0;">🏆 ${esc(qz.challenge.title)}</div>` : ''}
     <div class="result-card">
       <div class="score-ring">${pct}%</div>
       <p>You got ${qz.score} out of ${qz.qs.length} correct.<br>${msg}</p>
       <div class="result-actions">
-        <button class="btn" onclick="startQuiz('${s.id}')">Retake quiz</button>
-        <button class="btn secondary" onclick="shareQuizImage()">🖼 Share result</button>
-        <button class="btn secondary" onclick="go('set',{setId:'${s.id}'})">Back to set</button>
+        ${qz.challenge
+          ? `<button class="btn" onclick="retakeChallenge()">Retake quiz</button>
+             <button class="btn secondary" onclick="shareQuizImage()">🖼 Share result</button>
+             <button class="btn secondary" onclick="go('home')">Done</button>`
+          : `<button class="btn" onclick="startQuiz('${s ? s.id : ''}')">Retake quiz</button>
+             <button class="btn secondary" onclick="shareQuizImage()">🖼 Share result</button>
+             <button class="btn secondary" onclick="go('set',{setId:'${s ? s.id : ''}'})">Back to set</button>`}
       </div>
     </div>
+    ${qz.challenge ? `
+    <div class="section-title" style="margin-top:28px">🏆 Leaderboard</div>
+    <div id="challenge-board"><div class="empty-list">Loading scores…</div></div>` : ''}
     <div class="section-title" style="margin-top:28px">Answer key</div>`;
   for (const q of qz.qs) {
     html += `
@@ -1919,6 +2028,7 @@ function renderQuizResult() {
       </div>`;
   }
   app.innerHTML = html;
+  if (qz.challenge) renderChallengeBoard();
 }
 
 /* ----- Editor ----- */
@@ -2063,58 +2173,50 @@ function cardEditHTML(c, i) {
       </div>`;
 }
 const TATOEBA_LANG = { ja: 'jpn', ko: 'kor', es: 'spa', fr: 'fra', de: 'deu', vi: 'vie', th: 'tha', id: 'ind', 'zh-TW': 'cmn', 'zh-CN': 'cmn' };
-async function suggestExample(btn, i) {
-  if (!ed || !ed.cards[i]) return;
-  const term = (ed.cards[i].term || '').trim();
-  if (!term) { toast('Type the term first'); return; }
+async function fetchExampleFor(term) {
   // Non-English learning languages: real example sentences from Tatoeba
   if (LEARN_LANG !== 'en') {
     const code = TATOEBA_LANG[LEARN_LANG];
-    if (!code) { toast('Example suggestions not available for this language'); return; }
-    btn.disabled = true; btn.textContent = '…';
-    let tex = null;
+    if (!code) return null;
     try {
       const r = await fetch('https://api.tatoeba.org/unstable/sentences?lang=' + code + '&q=' + encodeURIComponent(term) + '&sort=relevance');
       if (r.ok) {
         const j = await r.json();
         const cands = (j.data || []).map(d => d.text)
           .filter(t => t && t.includes(term) && t.length >= term.length + 2 && t.length <= 90);
-        tex = cands[0] || null;
+        return cands[0] || null;
       }
-    } catch (e) { /* fall through */ }
-    btn.disabled = false; btn.textContent = '✨';
-    if (tex) {
-      const input = btn.previousElementSibling;
-      input.value = tex;
-      ed.cards[i].example = tex;
-      ensureTrailingBlank(i);
-    } else {
-      toast('No example found for this word — try writing your own');
-    }
-    return;
+    } catch (e) { /* unreachable */ }
+    return null;
   }
-  btn.disabled = true; btn.textContent = '…';
+  // English: dictionary examples (Wiktionary/Oxford data)
   const lookups = [term.toLowerCase()];
   if (term.includes(' ')) {
     const longest = term.split(/\s+/).sort((a, b) => b.length - a.length)[0];
     lookups.push(longest.toLowerCase());
   }
-  let ex = null;
   for (const w of lookups) {
     try {
       const r = await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(w));
       if (!r.ok) continue;
       const j = await r.json();
-      outer: for (const entry of (Array.isArray(j) ? j : [])) {
+      for (const entry of (Array.isArray(j) ? j : [])) {
         for (const m of entry.meanings || []) {
           for (const d of m.definitions || []) {
-            if (d.example) { ex = d.example; break outer; }
+            if (d.example) return d.example;
           }
         }
       }
-      if (ex) break;
     } catch (e) { /* try next */ }
   }
+  return null;
+}
+async function suggestExample(btn, i) {
+  if (!ed || !ed.cards[i]) return;
+  const term = (ed.cards[i].term || '').trim();
+  if (!term) { toast('Type the term first'); return; }
+  btn.disabled = true; btn.textContent = '…';
+  const ex = await fetchExampleFor(term);
   btn.disabled = false; btn.textContent = '✨';
   if (ex) {
     const input = btn.previousElementSibling;
@@ -2124,6 +2226,18 @@ async function suggestExample(btn, i) {
   } else {
     toast('No example found for this word — try writing your own');
   }
+}
+async function suggestExampleRow(btn) {
+  const termEl = document.getElementById('row-term');
+  const exEl = document.getElementById('row-ex');
+  if (!termEl || !exEl) return;
+  const term = termEl.value.trim();
+  if (!term) { toast('Type the term first'); return; }
+  btn.disabled = true; btn.textContent = '…';
+  const ex = await fetchExampleFor(term);
+  btn.disabled = false; btn.textContent = '✨';
+  if (ex) exEl.value = ex;
+  else toast('No example found for this word — try writing your own');
 }
 // When the user starts typing in the LAST card, append a fresh blank card automatically
 function ensureTrailingBlank(i) {
@@ -2178,9 +2292,10 @@ function saveEdit() {
 function backTarget() {
   switch (state.view) {
     case 'set': return () => go('home');
-    case 'flashcards':
+    case 'flashcards': return () => go('set', { setId: state.setId });
     case 'quiz':
-    case 'quizResult': return () => go('set', { setId: state.setId });
+    case 'quizResult':
+      return qz && qz.challenge ? () => go('home') : () => go('set', { setId: state.setId });
     case 'edit': return () => cancelEdit();
     case 'account': return () => go('home');
     default: return null;
