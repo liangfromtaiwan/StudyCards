@@ -1235,7 +1235,7 @@ function renderHome() {
       html += `
         <div class="swipe-wrap">
         <div class="swipe-bg edit"><span class="sb-ic">✎</span><span class="sb-label">Edit</span></div>
-        <div class="swipe-bg del"><span class="sb-label">${s.shared ? 'Leave' : 'Delete'}</span><span class="sb-ic">${s.shared ? '🚪' : '🗑'}</span></div>
+        <div class="swipe-bg del"><span class="sb-label">${s.shared && !isSetOwner(s) ? 'Leave' : 'Delete'}</span><span class="sb-ic">${s.shared && !isSetOwner(s) ? '🚪' : '🗑'}</span></div>
         <div class="set-card" data-id="${s.id}" onclick="openSetCard('${s.id}')">
           <div>
             <h3>${esc(s.title)}</h3>
@@ -1245,7 +1245,7 @@ function renderHome() {
           <div class="dot-menu" id="menu-${s.id}" onclick="event.stopPropagation()">
             <button onclick="openEditor('${s.id}')">✎ Edit</button>
             ${FIREBASE_ENABLED ? `<button onclick="shareSet('${s.id}')">🔗 Share</button>` : ''}
-            <button class="danger" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
+            <button class="danger" onclick="deleteSet('${s.id}')">${s.shared && !isSetOwner(s) ? '🚪 Leave' : '🗑 Delete'}</button>
           </div>
         </div>
         </div>`;
@@ -1439,7 +1439,7 @@ function renderSet() {
       ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="shareSet('${s.id}')">${s.shared ? '👥 ' + fmtCode(s.shared) : '🔗 Share'}</button>` : ''}
       ${s.shared && user && (!s.owner || s.owner === user.uid) ? `<button class="btn secondary small" onclick="unshareSet('${s.id}')">🔒 Unshare</button>` : ''}
       ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="createChallenge('${s.id}')">${s.challengeCode ? '🏆 ' + fmtCode(s.challengeCode) : '🏆 Challenge'}</button>` : ''}
-      <button class="btn danger small" onclick="deleteSet('${s.id}')">${s.shared ? '🚪 Leave' : '🗑 Delete'}</button>
+      <button class="btn danger small" onclick="deleteSet('${s.id}')">${s.shared && !isSetOwner(s) ? '🚪 Leave' : '🗑 Delete'}</button>
     </div>
     <div class="section-title">Terms in this set</div>
     <div class="term-toolbar">
@@ -1719,10 +1719,13 @@ function closeDialog() {
   overlay.classList.remove('open');
   overlay.innerHTML = '';
 }
+function isSetOwner(s) {
+  return !s.shared || (user && (!s.owner || s.owner === user.uid));
+}
 function deleteSet(id) {
   const s = getSet(id);
   if (!s) return;
-  if (s.shared) {
+  if (s.shared && !isSetOwner(s)) {
     showDangerDialog('🚪', 'Leave shared set?',
       `Are you sure you want to leave <strong>${esc(s.title)}</strong>?<br>Your study partner will keep it.`,
       'Leave', () => {
@@ -1730,6 +1733,19 @@ function deleteSet(id) {
         sets = sets.filter(x => x.id !== id);
         saveSets();
         toast('Left shared set');
+        go('home');
+      });
+    return;
+  }
+  if (s.shared && isSetOwner(s)) {
+    showDangerDialog('🗑', 'Delete for everyone?',
+      `<strong>${esc(s.title)}</strong> is a shared set.<br>Deleting it removes it for you <strong>and</strong> your study partner. This cannot be undone.`,
+      'Delete', async () => {
+        try { await db.collection('sharedSets').doc(s.shared).delete(); } catch (e) { /* rules guard */ }
+        sharedRefs = sharedRefs.filter(c => c !== s.shared);
+        sets = sets.filter(x => x.id !== id);
+        saveSets();
+        toast('Set deleted for everyone');
         go('home');
       });
     return;
