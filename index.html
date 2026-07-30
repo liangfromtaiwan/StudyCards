@@ -611,7 +611,10 @@ function loadSets() {
   return JSON.parse(JSON.stringify(SAMPLE_SETS));
 }
 function saveSets() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) { /* ignore */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sets));
+    localStorage.setItem('studycards.owner', user ? user.uid : 'local'); // who this cache belongs to
+  } catch (e) { /* ignore */ }
   if (user && db) {
     const own = sets.filter(s => !s.shared);
     db.collection('users').doc(user.uid)
@@ -1016,8 +1019,11 @@ async function loadCloudSets() {
     if (data && Array.isArray(data.sets)) {
       own = data.sets;
     } else {
-      // first sign-in on this account: upload whatever is stored locally
-      own = sets.filter(s => !s.shared);
+      // first sign-in on this account: migrate local data ONLY if it was created
+      // while signed out — never inherit another account's cached data
+      let owner = 'local';
+      try { owner = localStorage.getItem('studycards.owner') || 'local'; } catch (e) {}
+      own = owner === 'local' ? sets.filter(s => !s.shared) : JSON.parse(JSON.stringify(SAMPLE_SETS));
     }
     const shared = [];
     for (const code of sharedRefs) {
@@ -1030,7 +1036,10 @@ async function loadCloudSets() {
       } catch (e) { /* skip unreachable shared set */ }
     }
     sets = [...shared, ...own];
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) {}
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sets));
+      localStorage.setItem('studycards.owner', user.uid);
+    } catch (e) {}
     if (!(data && Array.isArray(data.sets))) saveSets();
   } catch (e) {
     toast('Could not load your cloud data: ' + e.message);
@@ -1105,10 +1114,15 @@ async function createChallenge(setId) {
     go('set', { setId });
   } catch (e) { toast('Could not create challenge: ' + e.message); }
 }
-function showChallengeCode(code) {
+async function showChallengeCode(code) {
   const disp = fmtCode(code);
-  if (navigator.clipboard) navigator.clipboard.writeText(disp).catch(() => {});
-  prompt('Challenge code — friends tap "Join set" and enter it to take the quiz and compete:', disp);
+  let copied = false;
+  try { await navigator.clipboard.writeText(disp); copied = true; } catch (e) { /* fall back below */ }
+  if (copied) {
+    toast(`🏆 Code ${disp} copied — send it to your friends!`);
+  } else {
+    prompt('Challenge code — friends tap "Join set" and enter it to compete:', disp);
+  }
 }
 function startChallenge(code, data) {
   const cards = data.cards || [];
@@ -1165,10 +1179,15 @@ function renderChallengeBoard() {
       </div>`).join('')
     : '<div class="empty-list">No scores yet — be the first!</div>';
 }
-function showShareCode(code) {
+async function showShareCode(code) {
   const disp = fmtCode(code);
-  if (navigator.clipboard) navigator.clipboard.writeText(disp).catch(() => {});
-  prompt('Share this code with your study partner.\nThey tap "Join set" and enter it:', disp);
+  let copied = false;
+  try { await navigator.clipboard.writeText(disp); copied = true; } catch (e) { /* fall back below */ }
+  if (copied) {
+    toast(`👥 Code ${disp} copied — send it to your study partner!`);
+  } else {
+    prompt('Share this code with your study partner.\nThey tap "Join set" and enter it:', disp);
+  }
 }
 async function joinSet() {
   if (!user) { toast('Sign in first to join a shared set'); go('login'); return; }
@@ -2437,7 +2456,19 @@ if (FIREBASE_ENABLED) {
       go('home');
       toast('Signed in as ' + u.email);
     } else {
-      sets = loadSets();
+      // signed out: if the local cache belonged to a cloud account, reset it
+      // (the data is safe in the cloud; don't leave it lying around locally)
+      let owner = 'local';
+      try { owner = localStorage.getItem('studycards.owner') || 'local'; } catch (e) {}
+      if (owner !== 'local') {
+        sets = JSON.parse(JSON.stringify(SAMPLE_SETS));
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(sets));
+          localStorage.setItem('studycards.owner', 'local');
+        } catch (e) {}
+      } else {
+        sets = loadSets();
+      }
       sharedRefs = [];
       if (wasSignedIn) { toast('Signed out'); go('login'); }
       else render();
