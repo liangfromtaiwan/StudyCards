@@ -2008,9 +2008,46 @@ function buildResultCanvas() {
   ctx.fillText('liangfromtaiwan.github.io/StudyCards', PAD, H - 60);
   return canvas;
 }
-function shareQuizImage() {
+let h2cLoading = null;
+function loadHtml2Canvas() {
+  if (window.html2canvas) return Promise.resolve();
+  if (!h2cLoading) {
+    h2cLoading = new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      sc.onload = res;
+      sc.onerror = () => { h2cLoading = null; rej(new Error('load failed')); };
+      document.head.appendChild(sc);
+    });
+  }
+  return h2cLoading;
+}
+async function shareQuizImage() {
   if (!qz) return;
-  buildResultCanvas().toBlob(async blob => {
+  toast('Creating image…');
+  let canvas;
+  try {
+    // capture the real result screen, exactly as shown
+    await loadHtml2Canvas();
+    const el = document.getElementById('result-capture');
+    if (!el) throw new Error('nothing to capture');
+    canvas = await window.html2canvas(el, {
+      backgroundColor: '#f6f7fb',
+      scale: 2,
+      useCORS: true,
+      onclone: doc => {
+        const actions = doc.querySelector('#result-capture .result-actions');
+        if (actions) actions.remove(); // buttons don't belong in a picture
+        const foot = doc.createElement('div');
+        foot.style.cssText = 'text-align:center; padding:18px 0 6px; color:#4255ff; font-weight:700; font-size:14px;';
+        foot.textContent = 'StudyCards · liangfromtaiwan.github.io/StudyCards';
+        doc.getElementById('result-capture').appendChild(foot);
+      }
+    });
+  } catch (e) {
+    canvas = buildResultCanvas(); // offline / load-failure fallback
+  }
+  canvas.toBlob(async blob => {
     if (!blob) { toast('Could not create the image'); return; }
     const file = new File([blob], 'studycards-quiz.png', { type: 'image/png' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2033,6 +2070,7 @@ function renderQuizResult() {
   const msg = pct === 100 ? 'Perfect score! 🏆' : pct >= 70 ? 'Nice work! 💪' : 'Keep practicing — you\'ll get there! 📖';
   let html = `
     <div class="back" onclick="${qz.challenge ? `go('home')` : `go('set',{setId:'${s ? s.id : ''}'})`}">${qz.challenge ? '← Home' : '← Back to set'}</div>
+    <div id="result-capture">
     ${qz.challenge ? `<div class="section-title" style="margin-top:0;">🏆 ${esc(qz.challenge.title)}</div>` : ''}
     <div class="result-card">
       <div class="score-ring">${pct}%</div>
@@ -2062,6 +2100,7 @@ function renderQuizResult() {
         </div>
       </div>`;
   }
+  html += `</div>`; // close #result-capture
   app.innerHTML = html;
   if (qz.challenge) renderChallengeBoard();
 }
