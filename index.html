@@ -1169,13 +1169,20 @@ async function submitChallengeScore() {
 function boardHTML(scoresObj) {
   const entries = Object.entries(scoresObj || {}).map(([u, v]) => ({ uid: u, ...v }));
   entries.sort((a, b) => b.pct - a.pct || a.at - b.at);
-  return entries.length
-    ? entries.map((e2, idx) => `
+  if (!entries.length) return '<div class="empty-list">No scores yet — be the first!</div>';
+  const medals = ['🥇', '🥈', '🥉'];
+  const row = (e2, idx) => `
       <div class="term-row" style="${user && e2.uid === user.uid ? 'border:1.5px solid var(--primary);' : ''}">
-        <div class="term">${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : (idx + 1) + '. '} ${esc(e2.name || 'Player')}</div>
+        <div class="term">${medals[idx] || (idx + 1) + '. '} ${esc(e2.name || 'Player')}</div>
         <div class="def">${e2.pct}%（${e2.score}/${e2.total}）</div>
-      </div>`).join('')
-    : '<div class="empty-list">No scores yet — be the first!</div>';
+      </div>`;
+  let html = entries.slice(0, 3).map(row).join('');
+  // if I'm not in the top 3, still show my own rank below
+  const myIdx = user ? entries.findIndex(e2 => e2.uid === user.uid) : -1;
+  if (myIdx >= 3) {
+    html += `<div class="empty-list" style="padding:6px;">⋯</div>` + row(entries[myIdx], myIdx);
+  }
+  return html;
 }
 function renderChallengeBoard() {
   const el = document.getElementById('challenge-board');
