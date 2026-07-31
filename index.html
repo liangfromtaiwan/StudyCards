@@ -630,6 +630,10 @@ function saveSets() {
 let sets = loadSets();
 let user = null, db = null;
 let sharedRefs = [];
+let joinedChallenges = []; // [{code, title}]
+function saveJoined() {
+  if (user && db) db.collection('users').doc(user.uid).set({ joinedChallenges }, { merge: true }).catch(() => {});
+}
 /* ----- Native language (translation target) ----- */
 const LANGS = [
   ['zh-TW', '繁體中文'], ['zh-CN', '简体中文'], ['ja', '日本語'], ['ko', '한국어'],
@@ -863,6 +867,8 @@ function render() {
   if (v === 'login') renderLogin();
   else if (v === 'home') renderHome();
   else if (v === 'account') renderAccount();
+  else if (v === 'challengeLobby') renderChallengeLobby();
+  else if (v === 'challenges') renderChallenges();
   else if (v === 'set') renderSet();
   else if (v === 'flashcards') renderFlashcards();
   else if (v === 'quiz') renderQuiz();
@@ -874,11 +880,13 @@ function render() {
 function renderNav() {
   const nav = document.getElementById('navbar');
   if (!nav) return;
-  const visible = ['home', 'set', 'account', 'quizResult'].includes(state.view);
+  const visible = ['home', 'set', 'account', 'quizResult', 'challengeLobby', 'challenges'].includes(state.view);
   document.body.classList.toggle('nav-visible', visible);
   nav.style.display = visible ? '' : 'none';
   if (!visible) return;
-  const active = state.view === 'account' ? 'account' : 'sets';
+  const active = state.view === 'account' ? 'account'
+    : (state.view === 'challenges' || state.view === 'challengeLobby') ? 'challenges'
+    : 'sets';
   nav.innerHTML = `
     <div class="nav-left">
       <div class="logo" onclick="go('home')">Study<span>Cards</span></div>
@@ -886,6 +894,7 @@ function renderNav() {
     </div>
     <div class="nav-tabs">
       <button class="nav-item ${active === 'sets' ? 'active' : ''}" onclick="go('home')"><span class="nicon">📚</span>Sets</button>
+      <button class="nav-item ${active === 'challenges' ? 'active' : ''}" onclick="go('challenges')"><span class="nicon">🏆</span>Challenges</button>
       <button class="nav-item" onclick="openEditor()"><span class="nicon">➕</span>Create</button>
       <button class="nav-item ${active === 'account' ? 'active' : ''}" onclick="go('account')"><span class="nicon">👤</span>Account</button>
     </div>
@@ -1007,6 +1016,7 @@ async function loadCloudSets() {
     const snap = await db.collection('users').doc(user.uid).get();
     const data = snap.exists ? snap.data() : null;
     sharedRefs = (data && Array.isArray(data.sharedRefs)) ? data.sharedRefs : [];
+    joinedChallenges = (data && Array.isArray(data.joinedChallenges)) ? data.joinedChallenges : [];
     if (data && data.lang) {
       APP_LANG = data.lang;
       try { localStorage.setItem('studycards.lang', data.lang); } catch (e) {}
@@ -1124,6 +1134,90 @@ async function showChallengeCode(code) {
     prompt('Challenge code — friends tap "Join set" and enter it to compete:', disp);
   }
 }
+let lobby = null;
+function openChallengeLobby(code, data) {
+  lobby = { code, data };
+  // remember joined challenges (not my own) so they show up in the Challenges tab
+  const isMine = sets.some(s => s.challengeCode === code);
+  if (!isMine) {
+    const existing = joinedChallenges.find(j => j.code === code);
+    if (existing) { existing.title = data.title; }
+    else joinedChallenges.push({ code, title: data.title });
+    saveJoined();
+  }
+  go('challengeLobby', {});
+}
+async function openChallengeByCode(code) {
+  if (!db || !user) { toast('Sign in first'); return; }
+  try {
+    const d = await db.collection('challenges').doc(code).get();
+    if (!d.exists) {
+      toast('This challenge no longer exists');
+      joinedChallenges = joinedChallenges.filter(j => j.code !== code);
+      saveJoined();
+      if (state.view === 'challenges') render();
+      return;
+    }
+    openChallengeLobby(code, d.data());
+  } catch (e) { toast('Could not load the challenge'); }
+}
+function removeJoined(code) {
+  const j = joinedChallenges.find(x => x.code === code);
+  showDangerDialog('🗑', 'Remove challenge?',
+    `Remove <strong>${esc(j ? j.title : '')}</strong> from your list?<br>You can rejoin anytime with the code.`,
+    'Remove', () => {
+      joinedChallenges = joinedChallenges.filter(x => x.code !== code);
+      saveJoined();
+      render();
+    });
+}
+function renderChallenges() {
+  let inner;
+  if (!FIREBASE_ENABLED || !user) {
+    inner = `<div class="empty-state"><div class="big">🏆</div><p>Sign in to create and join challenges.</p><br><button class="btn" onclick="go('login')">Sign in</button></div>`;
+  } else {
+    const mine = sets.filter(s => s.challengeCode).map(s => ({ code: s.challengeCode, title: s.title }));
+    const joined = joinedChallenges.filter(j => !mine.some(m => m.code === j.code));
+    const row = (c, removable) => `
+      <div class="set-card" onclick="openChallengeByCode('${c.code}')">
+        <div>
+          <h3>${esc(c.title)}</h3>
+          <div class="meta">🏆 ${fmtCode(c.code)}</div>
+        </div>
+        ${removable ? `<button class="icon-btn" title="Remove" onclick="event.stopPropagation(); removeJoined('${c.code}')">✕</button>` : ''}
+      </div>`;
+    inner = `
+      <div class="section-title">My challenges</div>
+      ${mine.length ? mine.map(c => row(c, false)).join('') : '<div class="empty-list">Create one from any set with the 🏆 Challenge button</div>'}
+      <div class="section-title">Joined</div>
+      ${joined.length ? joined.map(c => row(c, true)).join('') : '<div class="empty-list">Enter a friend\'s code below to join</div>'}
+      <button class="btn secondary full" style="margin-top:8px;" onclick="joinSet()">🔗 Enter a code</button>`;
+  }
+  app.innerHTML = `
+    <header><div class="logo" onclick="go('home')">Study<span>Cards</span></div></header>
+    ${inner}`;
+}
+function renderChallengeLobby() {
+  if (!lobby) return go('home');
+  const d = lobby.data;
+  app.innerHTML = `
+    <div class="back" onclick="go('challenges')">← Challenges</div>
+    <div class="set-title">🏆 ${esc(d.title)}</div>
+    <div class="set-sub">${(d.cards || []).length} words · Challenge</div>
+    <div style="margin:18px 0;">
+      <button class="btn full" onclick="startChallenge(lobby.code, lobby.data)">🎮 Start quiz</button>
+    </div>
+    <div class="section-title">🏆 Leaderboard</div>
+    <div id="lobby-board">${boardHTML(d.scores)}</div>`;
+}
+function exitChallenge() {
+  if (lobby && qz && qz.challenge && lobby.code === qz.challenge.code) {
+    lobby.data.scores = qz.challenge.scores; // bring back the freshest scores
+    go('challengeLobby', {});
+  } else {
+    go('home');
+  }
+}
 function startChallenge(code, data) {
   const cards = data.cards || [];
   if (cards.length < 2) { toast('This challenge has no cards'); return; }
@@ -1230,7 +1324,7 @@ async function joinSet() {
     if (!d.exists) {
       // maybe it's a challenge code
       const c = await db.collection('challenges').doc(code).get();
-      if (c.exists) { startChallenge(code, c.data()); return; }
+      if (c.exists) { openChallengeLobby(code, c.data()); return; }
       toast('No set found with that code');
       return;
     }
@@ -1874,7 +1968,7 @@ function renderQuiz() {
   if (!qz) return go('home');
   const s = qz.challenge ? null : getSet(state.setId);
   if (!s && !qz.challenge) return go('home');
-  const exitTo = qz.challenge ? `go('home')` : `go('set',{setId:'${s.id}'})`;
+  const exitTo = qz.challenge ? `exitChallenge()` : `go('set',{setId:'${s.id}'})`;
   const q = qz.qs[qz.i];
   const pct = (qz.i / qz.qs.length) * 100;
   let html = `
@@ -2105,7 +2199,7 @@ function renderQuizResult() {
   const pct = Math.round((qz.score / qz.qs.length) * 100);
   const msg = pct === 100 ? 'Perfect score! 🏆' : pct >= 70 ? 'Nice work! 💪' : 'Keep practicing — you\'ll get there! 📖';
   let html = `
-    <div class="back" onclick="${qz.challenge ? `go('home')` : `go('set',{setId:'${s ? s.id : ''}'})`}">${qz.challenge ? '← Home' : '← Back to set'}</div>
+    <div class="back" onclick="${qz.challenge ? `exitChallenge()` : `go('set',{setId:'${s ? s.id : ''}'})`}">${qz.challenge ? '← Back' : '← Back to set'}</div>
     <div id="result-capture">
     ${qz.challenge ? `<div class="section-title" style="margin-top:0;">🏆 ${esc(qz.challenge.title)}</div>` : ''}
     <div class="result-card">
@@ -2115,7 +2209,7 @@ function renderQuizResult() {
         ${qz.challenge
           ? `<button class="btn" onclick="retakeChallenge()">Retake quiz</button>
              <button class="btn secondary" onclick="shareQuizImage()">🖼 Share result</button>
-             <button class="btn secondary" onclick="go('home')">Done</button>`
+             <button class="btn secondary" onclick="exitChallenge()">Done</button>`
           : `<button class="btn" onclick="startQuiz('${s ? s.id : ''}')">Retake quiz</button>
              <button class="btn secondary" onclick="shareQuizImage()">🖼 Share result</button>
              <button class="btn secondary" onclick="go('set',{setId:'${s ? s.id : ''}'})">Back to set</button>`}
@@ -2405,7 +2499,9 @@ function backTarget() {
     case 'flashcards': return () => go('set', { setId: state.setId });
     case 'quiz':
     case 'quizResult':
-      return qz && qz.challenge ? () => go('home') : () => go('set', { setId: state.setId });
+      return qz && qz.challenge ? () => exitChallenge() : () => go('set', { setId: state.setId });
+    case 'challengeLobby': return () => go('challenges');
+    case 'challenges': return () => go('home');
     case 'edit': return () => cancelEdit();
     case 'account': return () => go('home');
     default: return null;
@@ -2561,6 +2657,7 @@ if (FIREBASE_ENABLED) {
         sets = loadSets();
       }
       sharedRefs = [];
+      joinedChallenges = [];
       if (wasSignedIn) { toast('Signed out'); go('login'); }
       else render();
     }
