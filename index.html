@@ -1166,18 +1166,40 @@ async function submitChallengeScore() {
   } catch (e) { toast('Could not submit your score: ' + e.message); }
   renderChallengeBoard();
 }
-function renderChallengeBoard() {
-  const el = document.getElementById('challenge-board');
-  if (!el || !qz || !qz.challenge) return;
-  const entries = Object.entries(qz.challenge.scores || {}).map(([u, v]) => ({ uid: u, ...v }));
+function boardHTML(scoresObj) {
+  const entries = Object.entries(scoresObj || {}).map(([u, v]) => ({ uid: u, ...v }));
   entries.sort((a, b) => b.pct - a.pct || a.at - b.at);
-  el.innerHTML = entries.length
+  return entries.length
     ? entries.map((e2, idx) => `
       <div class="term-row" style="${user && e2.uid === user.uid ? 'border:1.5px solid var(--primary);' : ''}">
         <div class="term">${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : (idx + 1) + '. '} ${esc(e2.name || 'Player')}</div>
         <div class="def">${e2.pct}%（${e2.score}/${e2.total}）</div>
       </div>`).join('')
     : '<div class="empty-list">No scores yet — be the first!</div>';
+}
+function renderChallengeBoard() {
+  const el = document.getElementById('challenge-board');
+  if (!el || !qz || !qz.challenge) return;
+  el.innerHTML = boardHTML(qz.challenge.scores);
+}
+async function loadSetBoard(code) {
+  const el = document.getElementById('set-board');
+  if (!el || !db) return;
+  try {
+    const d = await db.collection('challenges').doc(code).get();
+    if (!d.exists) { el.innerHTML = '<div class="empty-list">This challenge no longer exists</div>'; return; }
+    if (document.getElementById('set-board')) document.getElementById('set-board').innerHTML = boardHTML(d.data().scores);
+  } catch (e) {
+    el.innerHTML = '<div class="empty-list">Could not load scores</div>';
+  }
+}
+function ownerTakeChallenge(setId) {
+  const s = getSet(setId);
+  if (!s || !s.challengeCode || !db) return;
+  db.collection('challenges').doc(s.challengeCode).get().then(d => {
+    if (d.exists) startChallenge(s.challengeCode, d.data());
+    else toast('This challenge no longer exists');
+  });
 }
 async function showShareCode(code) {
   const disp = fmtCode(code);
@@ -1441,6 +1463,12 @@ function renderSet() {
       ${FIREBASE_ENABLED ? `<button class="btn secondary small" onclick="createChallenge('${s.id}')">${s.challengeCode ? '🏆 ' + fmtCode(s.challengeCode) : '🏆 Challenge'}</button>` : ''}
       <button class="btn danger small" onclick="deleteSet('${s.id}')">${s.shared && !isSetOwner(s) ? '🚪 Leave' : '🗑 Delete'}</button>
     </div>
+    ${s.challengeCode && FIREBASE_ENABLED ? `
+    <div class="section-title">🏆 Challenge leaderboard</div>
+    <div id="set-board"><div class="empty-list">Loading scores…</div></div>
+    <div style="text-align:center; margin:4px 0 20px;">
+      <button class="btn secondary small" onclick="ownerTakeChallenge('${s.id}')">🎮 Take the challenge quiz</button>
+    </div>` : ''}
     <div class="section-title">Terms in this set</div>
     <div class="term-toolbar">
       <div class="search-wrap">
@@ -1463,6 +1491,7 @@ function renderSet() {
   const sortSel = document.getElementById('term-sort');
   if (sortSel) sortSel.value = termSort;
   applyTermView(s.id);
+  if (s.challengeCode && FIREBASE_ENABLED) loadSetBoard(s.challengeCode);
 }
 /* ----- Term list view: search / filter / sort ----- */
 let termQuery = '', termFilter = 'all', termSort = 'new', lastTermViewSet = null;
