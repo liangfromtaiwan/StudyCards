@@ -617,8 +617,9 @@ function saveSets() {
   } catch (e) { /* ignore */ }
   if (user && db) {
     const own = sets.filter(s => !s.shared);
+    const order = sets.map(s => s.id); // remembers the mixed shared/own ordering
     db.collection('users').doc(user.uid)
-      .set({ sets: own, sharedRefs, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+      .set({ sets: own, sharedRefs, order, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
       .catch(e => toast('Cloud sync failed: ' + e.message));
     for (const s of sets.filter(s => s.shared)) {
       db.collection('sharedSets').doc(s.shared)
@@ -1046,6 +1047,11 @@ async function loadCloudSets() {
       } catch (e) { /* skip unreachable shared set */ }
     }
     sets = [...shared, ...own];
+    // restore the exact ordering the user arranged (mixed shared/own)
+    if (data && Array.isArray(data.order)) {
+      const pos = new Map(data.order.map((k, i) => [k, i]));
+      sets.sort((a, b) => (pos.has(a.id) ? pos.get(a.id) : 1e9) - (pos.has(b.id) ? pos.get(b.id) : 1e9));
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sets));
       localStorage.setItem('studycards.owner', user.uid);
@@ -1136,6 +1142,14 @@ async function showChallengeCode(code) {
   }
 }
 let lobby = null;
+// old challenges were created before creator names existed — fill it in when the creator opens one
+function backfillCreatorName(code, data) {
+  if (db && user && data.createdBy === user.uid && !data.creatorName) {
+    const n = ensureDisplayName();
+    data.creatorName = n;
+    db.collection('challenges').doc(code).set({ creatorName: n }, { merge: true }).catch(() => {});
+  }
+}
 function rememberJoined(code, data) {
   // remember joined challenges (not my own) so they show up in the Challenges tab
   const isMine = sets.some(s => s.challengeCode === code);
@@ -1146,6 +1160,7 @@ function rememberJoined(code, data) {
   saveJoined();
 }
 function openChallengeLobby(code, data) {
+  backfillCreatorName(code, data);
   lobby = { code, data };
   rememberJoined(code, data);
   go('challengeLobby', {});
@@ -1310,9 +1325,11 @@ async function joinSet() {
       const c = await db.collection('challenges').doc(code).get();
       if (c.exists) {
         // entering a code jumps straight into the quiz; the lobby stays reachable from the Challenges tab
-        rememberJoined(code, c.data());
-        lobby = { code, data: c.data() };
-        startChallenge(code, c.data());
+        const cdata = c.data();
+        backfillCreatorName(code, cdata);
+        rememberJoined(code, cdata);
+        lobby = { code, data: cdata };
+        startChallenge(code, cdata);
         return;
       }
       toast('No set found with that code');
@@ -1345,16 +1362,21 @@ function renderHome() {
       <select id="home-filter" class="mini-select" style="padding-top:8px; padding-bottom:8px;" onchange="homeFilter=this.value; render()">
         <option value="all">All</option>
         <option value="mine">My sets</option>
-        <option value="shared">👥 Shared</option>
+        <option value="sharedByMe">👥 Shared by me</option>
+        <option value="sharedToMe">🤝 Shared with me</option>
       </select>
     </div>
     <div style="height:12px"></div>`;
-  const visibleSets = sets.filter(s =>
-    homeFilter === 'all' ? true : homeFilter === 'shared' ? !!s.shared : !s.shared);
+  const visibleSets = sets.filter(s => {
+    if (homeFilter === 'mine') return !s.shared;
+    if (homeFilter === 'sharedByMe') return s.shared && isSetOwner(s);
+    if (homeFilter === 'sharedToMe') return s.shared && !isSetOwner(s);
+    return true;
+  });
   if (!sets.length) {
     html += `<div class="empty-state"><div class="big">📚</div><p>No study sets yet.<br>Create your first one!</p><br><button class="btn" onclick="openEditor()">＋ Create a set</button></div>`;
   } else if (!visibleSets.length) {
-    html += `<div class="empty-list">No ${homeFilter === 'shared' ? 'shared' : 'personal'} sets yet.</div>`;
+    html += `<div class="empty-list">No sets in this category yet.</div>`;
   } else {
     for (const s of visibleSets) {
       html += `
