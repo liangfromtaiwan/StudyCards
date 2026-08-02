@@ -1340,7 +1340,7 @@ async function joinSet() {
     sets.unshift({ id: 'shared-' + code, shared: code, owner: sd.createdBy, title: sd.title, cards: sd.cards || [] });
     saveSets();
     toast('Joined "' + sd.title + '"');
-    render();
+    go('set', { setId: 'shared-' + code }); // jump straight in so you can start reading
   } catch (e) { toast('Could not join: ' + e.message); }
 }
 
@@ -1368,7 +1368,7 @@ function renderHome() {
     </div>
     <div style="height:12px"></div>`;
   const visibleSets = sets.filter(s => {
-    if (homeFilter === 'mine') return !s.shared;
+    if (homeFilter === 'mine') return isSetOwner(s); // my own sets, including ones I shared
     if (homeFilter === 'sharedByMe') return s.shared && isSetOwner(s);
     if (homeFilter === 'sharedToMe') return s.shared && !isSetOwner(s);
     return true;
@@ -1386,7 +1386,7 @@ function renderHome() {
         <div class="set-card" data-id="${s.id}" onclick="openSetCard('${s.id}')">
           <div>
             <h3>${esc(s.title)}</h3>
-            <div class="meta">${s.cards.length} terms${s.shared ? ' · 👥 shared' : ''}</div>
+            <div class="meta">${s.cards.length} terms${s.shared ? (isSetOwner(s) ? ' · 👥 Shared by me' : ' · 🤝 Shared with me') : ''}</div>
           </div>
           <button class="dot-btn" title="More options" onclick="event.stopPropagation(); toggleDotMenu('${s.id}')">⋮</button>
           <div class="dot-menu" id="menu-${s.id}" onclick="event.stopPropagation()">
