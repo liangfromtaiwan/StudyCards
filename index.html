@@ -2063,6 +2063,7 @@ function renderQuiz() {
     <div class="quiz-q">
       <div class="qlabel">What is the definition of…</div>
       <div class="qtext-row"><div class="qtext">${esc(q.term)}</div>${speakBtn(q.term, termLang())}</div>
+      ${q.example ? `<div class="fc-example" style="margin-top:10px; font-size:15px;">${esc(q.example)} ${speakBtn(q.example, termLang())}</div>` : ''}
     </div>
     <div class="feedback" id="fb"></div>
     <div id="choices">`;
