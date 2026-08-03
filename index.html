@@ -1061,10 +1061,10 @@ async function loadCloudSets() {
     toast('Could not load your cloud data: ' + e.message);
   }
 }
-function genCode() {
+function genCode(prefix = '') {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no confusing 0/O/1/I/L
-  let c = '';
-  for (let i = 0; i < 8; i++) c += A[Math.floor(Math.random() * A.length)];
+  let c = prefix; // 'S' = shared set, 'C' = challenge — tells codes apart at a glance
+  while (c.length < 8) c += A[Math.floor(Math.random() * A.length)];
   return c;
 }
 function fmtCode(code) { return code.slice(0, 4) + '-' + code.slice(4); }
@@ -1073,10 +1073,11 @@ async function shareSet(setId) {
   const s = getSet(setId);
   if (!s) return;
   if (s.shared) { showShareCode(s.shared); return; }
-  const code = genCode();
+  const code = genCode('S');
   try {
     await db.collection('sharedSets').doc(code).set({
       title: s.title, cards: s.cards, createdBy: user.uid,
+      creatorName: ensureDisplayName(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     s.shared = code;
@@ -1115,7 +1116,7 @@ async function createChallenge(setId) {
   const s = getSet(setId);
   if (!s || s.cards.length < 2) { toast('Add at least 2 cards first'); return; }
   if (s.challengeCode) { showChallengeCode(s.challengeCode); return; }
-  const code = genCode();
+  const code = genCode('C');
   try {
     await db.collection('challenges').doc(code).set({
       title: s.title,
@@ -1311,37 +1312,92 @@ async function showShareCode(code) {
     prompt('Share this code with your study partner.\nThey tap "Join set" and enter it:', disp);
   }
 }
-async function joinSet() {
+function joinSet() {
   if (!user) { toast('Sign in first to join a shared set'); go('login'); return; }
-  let code = prompt('Enter the share code (e.g. K3W9-XQ2P):');
+  const overlay = document.getElementById('dialog');
+  overlay.innerHTML = `
+    <div class="dialog-card">
+      <div class="dialog-icon" style="background:#e9ecff;">🔗</div>
+      <div class="dialog-title">Enter a code</div>
+      <div class="dialog-msg">Shared set or challenge code（e.g. K3W9-XQ2P）</div>
+      <div style="display:flex; gap:8px; margin-bottom:16px;">
+        <input type="text" id="join-code" autocapitalize="characters" autocomplete="off" spellcheck="false"
+          placeholder="XXXX-XXXX"
+          style="flex:1; min-width:0; text-align:center; font-weight:700; letter-spacing:1px;"
+          onkeydown="if(event.key==='Enter')submitJoinCode()">
+        <button class="btn secondary" style="flex-shrink:0; padding:0 14px;" onclick="pasteJoinCode()">📋 Paste</button>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn secondary" onclick="closeDialog()">Cancel</button>
+        <button class="btn" onclick="submitJoinCode()">Join</button>
+      </div>
+    </div>`;
+  overlay.classList.add('open');
+  setTimeout(() => { const i = document.getElementById('join-code'); if (i) i.focus(); }, 60);
+}
+async function pasteJoinCode() {
+  try {
+    const t = await navigator.clipboard.readText();
+    const i = document.getElementById('join-code');
+    if (i && t) i.value = t.trim();
+  } catch (e) {
+    toast('Paste not allowed — long-press the field to paste instead');
+  }
+}
+function submitJoinCode() {
+  const i = document.getElementById('join-code');
+  const v = i ? i.value : '';
+  closeDialog();
+  joinSetWithCode(v);
+}
+async function joinSetWithCode(raw) {
+  let code = (raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!code) return;
-  code = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== 8) { toast('That code doesn\'t look right'); return; }
-  if (sharedRefs.includes(code)) { toast('You already joined this set'); return; }
+  if (sharedRefs.includes(code)) { toast('You already joined this set'); go('set', { setId: 'shared-' + code }); return; }
   try {
     const d = await db.collection('sharedSets').doc(code).get();
-    if (!d.exists) {
-      // maybe it's a challenge code
-      const c = await db.collection('challenges').doc(code).get();
-      if (c.exists) {
-        // entering a code jumps straight into the quiz; the lobby stays reachable from the Challenges tab
-        const cdata = c.data();
-        backfillCreatorName(code, cdata);
-        rememberJoined(code, cdata);
-        lobby = { code, data: cdata };
-        startChallenge(code, cdata);
-        return;
-      }
-      toast('No set found with that code');
-      return;
-    }
-    const sd = d.data();
-    sharedRefs.push(code);
-    sets.unshift({ id: 'shared-' + code, shared: code, owner: sd.createdBy, title: sd.title, cards: sd.cards || [] });
-    saveSets();
-    toast('Joined "' + sd.title + '"');
-    go('set', { setId: 'shared-' + code }); // jump straight in so you can start reading
+    if (d.exists) { showJoinConfirm('shared', code, d.data()); return; }
+    const c = await db.collection('challenges').doc(code).get();
+    if (c.exists) { showJoinConfirm('challenge', code, c.data()); return; }
+    toast('No set found with that code');
   } catch (e) { toast('Could not join: ' + e.message); }
+}
+// preview dialog: what is this code, whose set, before actually joining
+function showJoinConfirm(type, code, data) {
+  const overlay = document.getElementById('dialog');
+  const isCh = type === 'challenge';
+  const by = data.creatorName ? esc(data.creatorName) : '';
+  overlay.innerHTML = `
+    <div class="dialog-card">
+      <div class="dialog-icon" style="background:${isCh ? '#fff3d6' : '#e9ecff'};">${isCh ? '🏆' : '👥'}</div>
+      <div class="dialog-title">${isCh ? 'Challenge invitation' : 'Shared set invitation'}</div>
+      <div class="dialog-msg">
+        <strong>${esc(data.title || '')}</strong>（${(data.cards || []).length} words）
+        ${by ? `<br>${isCh ? 'A challenge from' : 'Shared with you by'} <strong>${by}</strong>` : ''}
+        <br>${isCh ? 'Take the quiz and climb the leaderboard!' : 'You\'ll study and edit this set together.'}
+      </div>
+      <div class="dialog-actions">
+        <button class="btn secondary" onclick="closeDialog()">Cancel</button>
+        <button class="btn" id="join-confirm">${isCh ? '🎮 Start quiz' : '🤝 Join set'}</button>
+      </div>
+    </div>`;
+  overlay.classList.add('open');
+  document.getElementById('join-confirm').onclick = () => {
+    closeDialog();
+    if (isCh) {
+      backfillCreatorName(code, data);
+      rememberJoined(code, data);
+      lobby = { code, data };
+      startChallenge(code, data);
+    } else {
+      sharedRefs.push(code);
+      sets.unshift({ id: 'shared-' + code, shared: code, owner: data.createdBy, title: data.title, cards: data.cards || [] });
+      saveSets();
+      toast('Joined "' + data.title + '"');
+      go('set', { setId: 'shared-' + code });
+    }
+  };
 }
 
 /* ----- Home ----- */
@@ -1566,6 +1622,10 @@ function renderSet() {
       s.title = sd.title;
       s.cards = sd.cards || [];
       s.owner = sd.createdBy;
+      // old shared sets: fill in the sharer's name once the owner opens it
+      if (user && sd.createdBy === user.uid && !sd.creatorName) {
+        db.collection('sharedSets').doc(s.shared).set({ creatorName: ensureDisplayName() }, { merge: true }).catch(() => {});
+      }
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) {}
       if (changed && state.view === 'set' && state.setId === s.id) renderSet();
     }).catch(() => {});
