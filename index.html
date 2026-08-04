@@ -202,7 +202,23 @@
   .progress-bar { height: 5px; background: var(--border); border-radius: 3px; margin-bottom: 24px; overflow:hidden; }
   .progress-bar .fill { height:100%; background: var(--primary); border-radius:3px; transition: width .25s; }
 
-  .flip-scene { perspective: 1200px; margin-bottom: 20px; }
+  .flip-scene { perspective: 1200px; margin-bottom: 20px; position: relative; }
+  .fc-counts { display: flex; justify-content: space-between; margin-bottom: 12px; }
+  .cnt {
+    min-width: 52px; text-align: center; padding: 7px 14px;
+    border-radius: 999px; font-weight: 800; font-size: 15px;
+  }
+  .cnt.learn { background: #fff3e0; color: #e8890c; border: 1.5px solid #f5c98a; }
+  .cnt.know { background: #e9f9f1; color: var(--green); border: 1.5px solid #9fe3c0; }
+  .fc-badge {
+    position: absolute; top: 50%; left: 50%; z-index: 0; /* sits BEHIND the card, revealed as it slides away */
+    padding: 12px 22px; border-radius: 14px;
+    font-weight: 800; font-size: 21px; white-space: nowrap;
+    opacity: 0; pointer-events: none; background: #ffffff;
+  }
+  .fc-badge.know { color: var(--green); border: 3px solid var(--green); transform: translate(-50%, -50%); }
+  .fc-badge.learn { color: #e8890c; border: 3px solid #e8890c; transform: translate(-50%, -50%); }
+  .flip-card { z-index: 1; }
   .flip-card {
     position: relative; width: 100%; height: 340px;
     transform-style: preserve-3d; transition: transform .45s cubic-bezier(.4,.1,.2,1);
@@ -619,7 +635,7 @@ function saveSets() {
     const own = sets.filter(s => !s.shared);
     const order = sets.map(s => s.id); // remembers the mixed shared/own ordering
     db.collection('users').doc(user.uid)
-      .set({ sets: own, sharedRefs, order, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+      .set({ sets: own, sharedRefs, order, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
       .catch(e => toast('Cloud sync failed: ' + e.message));
     for (const s of sets.filter(s => s.shared)) {
       db.collection('sharedSets').doc(s.shared)
@@ -1976,12 +1992,33 @@ let fc = null;
 function startFlashcards(setId) {
   const s = getSet(setId);
   if (!s || !s.cards.length) { toast('This set has no cards yet'); return; }
-  fc = { setId, order: shuffle(s.cards), i: 0, flipped: false };
+  fc = { setId, order: shuffle(s.cards), i: 0, flipped: false, know: 0, learn: 0, done: false };
   go('flashcards', { setId });
 }
 function renderFlashcards() {
   const s = getSet(state.setId);
   if (!s || !fc) return go('home');
+  if (fc.done) {
+    app.innerHTML = `
+      <div class="study-top">
+        <div class="back" onclick="go('set',{setId:'${s.id}'})" style="margin:0">✕ Exit</div>
+        <div></div><div style="width:60px"></div>
+      </div>
+      <div class="result-card">
+        <div style="font-size:46px; margin-bottom:8px;">🎉</div>
+        <div style="font-size:26px; font-weight:800; margin-bottom:10px;">Round complete!</div>
+        <p>
+          <span style="color:var(--green); font-weight:800;">✓ ${fc.know} known</span>
+          &nbsp;·&nbsp;
+          <span style="color:#e8890c; font-weight:800;">↻ ${fc.learn} still learning</span>
+        </p>
+        <div class="result-actions">
+          <button class="btn" onclick="startFlashcards('${s.id}')">Restart</button>
+          <button class="btn secondary" onclick="go('set',{setId:'${s.id}'})">Back to set</button>
+        </div>
+      </div>`;
+    return;
+  }
   const card = fc.order[fc.i];
   const pct = ((fc.i + 1) / fc.order.length) * 100;
   app.innerHTML = `
@@ -1989,7 +2026,13 @@ function renderFlashcards() {
       <div class="back" onclick="go('set',{setId:'${s.id}'})" style="margin:0">✕ Exit</div>
       <button class="btn ghost small" onclick="shuffleFc()">🔀 Shuffle</button>
     </div>
+    <div class="fc-counts">
+      <span class="cnt learn">${fc.learn}</span>
+      <span class="cnt know">${fc.know}</span>
+    </div>
     <div class="flip-scene">
+      <div class="fc-badge learn" id="fcb-learn">↻ Still learning</div>
+      <div class="fc-badge know" id="fcb-know">✓ Know it</div>
       <div class="flip-card ${fc.flipped ? 'flipped' : ''}" onclick="flipFc()">
         <div class="flip-face"><div class="hint">Term</div>${speakBtn(card.term, termLang())}${esc(card.term)}</div>
         <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def, APP_LANG)}<div>${esc(card.def)}${card.example ? `<div class="fc-example">${esc(card.example)} ${speakBtn(card.example, termLang())}</div>` : ''}</div></div>
@@ -2006,8 +2049,83 @@ function renderFlashcards() {
     <div style="text-align:center; margin-top:24px;">
       <button class="btn" onclick="go('set',{setId:'${s.id}'})">← Back to set</button>
     </div>` : ''}`;
+  initFcSwipe();
 }
-function flipFc() { fc.flipped = !fc.flipped; document.querySelector('.flip-card').classList.toggle('flipped', fc.flipped); }
+/* Swipe the card: right = know it, left = still learning (Quizlet-style) */
+let fcSuppressFlip = false;
+function initFcSwipe() {
+  const el = document.querySelector('.flip-card');
+  if (el) el.addEventListener('touchstart', onFcTouchStart, { passive: true });
+}
+function onFcTouchStart(e) {
+  if (e.touches.length !== 1 || !fc || fc.done) return;
+  if (e.touches[0].clientX < 30) return; // leave the left edge to the back gesture
+  const el = e.currentTarget;
+  const bKnow = document.getElementById('fcb-know');
+  const bLearn = document.getElementById('fcb-learn');
+  const base = () => fc.flipped ? ' rotateX(180deg)' : '';
+  const sw = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, active: false, dx: 0 };
+  const onMove = ev => {
+    const t = ev.touches[0];
+    const dx = t.clientX - sw.x0, dy = t.clientY - sw.y0;
+    if (!sw.active) {
+      if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) { finish(false); return; }
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) { sw.active = true; fcSuppressFlip = true; }
+      else return;
+    }
+    sw.dx = dx;
+    const p = Math.min(1, Math.abs(dx) / (el.offsetWidth * 0.35));
+    el.style.transition = 'none';
+    el.style.transform = `translateX(${dx}px) rotate(${dx * 0.04}deg)${base()}`;
+    el.style.boxShadow = dx > 0
+      ? `0 4px 16px rgba(40,46,62,.12), 0 0 0 3px rgba(35,178,109,${p})`
+      : `0 4px 16px rgba(40,46,62,.12), 0 0 0 3px rgba(232,137,12,${p})`;
+    if (bKnow) bKnow.style.opacity = dx > 0 ? p : 0;
+    if (bLearn) bLearn.style.opacity = dx < 0 ? p : 0;
+  };
+  const onEnd = () => finish(true);
+  function finish(fromUp) {
+    el.removeEventListener('touchmove', onMove);
+    el.removeEventListener('touchend', onEnd);
+    el.removeEventListener('touchcancel', onEnd);
+    setTimeout(() => { fcSuppressFlip = false; }, 300);
+    const trigger = fromUp && sw.active && Math.abs(sw.dx) > el.offsetWidth * 0.35;
+    if (trigger) {
+      const dir = sw.dx > 0 ? 1 : -1;
+      el.style.transition = 'transform .25s ease-out, opacity .25s ease-out';
+      el.style.transform = `translateX(${dir * 130}%) rotate(${dir * 14}deg)${base()}`;
+      el.style.opacity = '0';
+      const card = fc.order[fc.i];
+      if (dir > 0) { fc.know++; card.misses = 0; }
+      else { fc.learn++; card.misses = (card.misses || 0) + 1; }
+      saveSets();
+      if (navigator.vibrate) navigator.vibrate(25);
+      setTimeout(() => {
+        if (fc.i >= fc.order.length - 1) fc.done = true;
+        else fc.i++;
+        fc.flipped = false;
+        renderFlashcards();
+      }, 250);
+    } else {
+      el.style.transition = 'transform .2s ease-out, box-shadow .2s ease-out';
+      el.style.transform = fc.flipped ? 'rotateX(180deg)' : '';
+      el.style.boxShadow = '';
+      if (bKnow) bKnow.style.opacity = 0;
+      if (bLearn) bLearn.style.opacity = 0;
+      setTimeout(() => { el.style.transition = ''; }, 220);
+    }
+  }
+  el.addEventListener('touchmove', onMove, { passive: true });
+  el.addEventListener('touchend', onEnd);
+  el.addEventListener('touchcancel', onEnd);
+}
+function flipFc() {
+  if (fcSuppressFlip) return; // don't flip right after a swipe
+  fc.flipped = !fc.flipped;
+  const el = document.querySelector('.flip-card');
+  el.style.transform = ''; // clear any leftover swipe transform so the CSS flip works
+  el.classList.toggle('flipped', fc.flipped);
+}
 function moveFc(d) {
   const n = fc.i + d;
   if (n < 0 || n >= fc.order.length) return;
