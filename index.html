@@ -29,6 +29,10 @@
   }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html { background: var(--bg); }
+  /* no rubber-band bounce, no sideways overflow from card-swipe transforms */
+  html, body { overscroll-behavior-y: none; overflow-x: clip; }
+  /* when a view fits on screen (flashcards, quiz…) lock scrolling entirely */
+  html.fits, html.fits body { overflow: hidden; height: 100%; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background: var(--bg); color: var(--text);
@@ -445,6 +449,21 @@
   @keyframes ctaShine { 0% { left: -60%; } 45%, 100% { left: 130%; } }
   .cta-title { font-size: 20px; font-weight: 800; letter-spacing: .3px; }
   .cta-sub { font-size: 13.5px; font-weight: 600; opacity: .92; }
+  /* unread-mail style badge for challenges with new words */
+  .new-dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--primary); margin-right: 7px; vertical-align: 1px;
+    animation: dotPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes dotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+  .new-words { color: var(--primary); font-weight: 700; }
+  /* fixed bar that keeps the CTA at the bottom of the lobby screen */
+  .cta-dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    padding: 14px 16px 12px;
+    background: linear-gradient(to top, var(--bg) 72%, rgba(246,247,251,0));
+  }
+  .cta-dock .challenge-cta { max-width: 608px; margin: 0 auto; }
   .home-chips {
     display: flex; gap: 8px; margin-bottom: 14px;
     overflow-x: auto; -webkit-overflow-scrolling: touch;
@@ -671,9 +690,27 @@ function saveSets() {
   if (user && db) {
     const own = sets.filter(s => !s.shared);
     const order = sets.map(s => s.id); // remembers the mixed shared/own ordering
+    // challenge codes keyed by set id — shared sets are rebuilt from the cloud on load,
+    // so their challengeCode must be stored separately or it gets lost
+    const challengeCodes = {};
+    for (const s of sets) if (s.challengeCode) challengeCodes[s.id] = s.challengeCode;
     db.collection('users').doc(user.uid)
-      .set({ sets: own, sharedRefs, order, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+      .set({ sets: own, sharedRefs, order, challengeCodes, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
       .catch(e => toast('Cloud sync failed: ' + e.message));
+    // keep my challenges in sync with their sets: when the cards actually change,
+    // push the new cards + a timestamp so joiners get a "new words" badge
+    for (const s of sets) {
+      if (!s.challengeCode || !(s.challengeCode in challengeSig)) continue; // only my own, once seeded
+      const sig = cardSig(s.cards);
+      if (sig === challengeSig[s.challengeCode]) continue;
+      challengeSig[s.challengeCode] = sig;
+      db.collection('challenges').doc(s.challengeCode)
+        .set({
+          title: s.title,
+          cards: s.cards.map(c => ({ term: c.term, def: c.def, ...(c.example ? { example: c.example } : {}) })),
+          cardsUpdatedAt: Date.now()
+        }, { merge: true }).catch(() => {});
+    }
     for (const s of sets.filter(s => s.shared)) {
       db.collection('sharedSets').doc(s.shared)
         .set({ title: s.title, cards: s.cards, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
@@ -929,7 +966,22 @@ function render() {
   else if (v === 'quizResult') renderQuizResult();
   else if (v === 'edit') renderEditor();
   renderNav();
+  updateScrollLock();
 }
+/* If the current view fits on screen, disable page scrolling so short pages
+   (like flashcards) don't wobble or show a scroll bar on iOS */
+function updateScrollLock() {
+  requestAnimationFrame(() => {
+    const doc = document.documentElement;
+    doc.classList.remove('fits'); // measure the natural height first
+    const fits = document.scrollingElement.scrollHeight <= window.innerHeight + 1;
+    doc.classList.toggle('fits', fits);
+  });
+}
+window.addEventListener('resize', () => {
+  if (typeof state === 'object') updateScrollLock();
+  if (typeof positionCtaDock === 'function') positionCtaDock();
+});
 /* ----- Navbar ----- */
 function renderNav() {
   const nav = document.getElementById('navbar');
@@ -1100,6 +1152,10 @@ async function loadCloudSets() {
       } catch (e) { /* skip unreachable shared set */ }
     }
     sets = [...shared, ...own];
+    // re-attach challenge codes (shared sets are rebuilt above and lose theirs)
+    if (data && data.challengeCodes) {
+      for (const s of sets) if (!s.challengeCode && data.challengeCodes[s.id]) s.challengeCode = data.challengeCodes[s.id];
+    }
     // restore the exact ordering the user arranged (mixed shared/own)
     if (data && Array.isArray(data.order)) {
       const pos = new Map(data.order.map((k, i) => [k, i]));
@@ -1177,8 +1233,10 @@ async function createChallenge(setId) {
       createdBy: user.uid,
       creatorName: ensureDisplayName(),
       scores: {},
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      cardsUpdatedAt: Date.now()
     });
+    challengeSig[code] = cardSig(s.cards);
     s.challengeCode = code;
     saveSets();
     showChallengeCode(code);
@@ -1206,11 +1264,12 @@ function backfillCreatorName(code, data) {
 }
 function rememberJoined(code, data) {
   // remember joined challenges (not my own) so they show up in the Challenges tab
-  const isMine = sets.some(s => s.challengeCode === code);
+  const isMine = (user && data.createdBy === user.uid) || sets.some(s => s.challengeCode === code);
   if (isMine) return;
   const existing = joinedChallenges.find(j => j.code === code);
-  if (existing) { existing.title = data.title; existing.by = data.creatorName || existing.by || ''; }
-  else joinedChallenges.push({ code, title: data.title, by: data.creatorName || '' });
+  if (existing) { existing.title = data.title; existing.by = data.creatorName || existing.by || ''; existing.seen = Date.now(); }
+  else joinedChallenges.push({ code, title: data.title, by: data.creatorName || '', seen: Date.now() });
+  joinedNew[code] = false; // opening the lobby marks it as read
   saveJoined();
 }
 function openChallengeLobby(code, data) {
@@ -1243,24 +1302,88 @@ function removeJoined(code) {
       render();
     });
 }
+// all challenges I created, straight from the cloud — recovers codes that were
+// lost locally (e.g. challenges made from shared sets before codes were persisted)
+let myCloudChallenges = null;
+let fetchingMyChallenges = false;
+let challengeSig = {}; // last-synced card content per challenge code (mine only)
+function cardSig(cards) {
+  return JSON.stringify((cards || []).map(c => [c.term, c.def, c.example || '']));
+}
+async function fetchMyChallenges() {
+  if (!db || !user || fetchingMyChallenges) return;
+  fetchingMyChallenges = true;
+  try {
+    const snap = await db.collection('challenges').where('createdBy', '==', user.uid).get();
+    snap.docs.forEach(d => { challengeSig[d.id] = cardSig(d.data().cards); });
+    const fresh = snap.docs.map(d => ({ code: d.id, title: d.data().title }));
+    const changed = JSON.stringify(fresh) !== JSON.stringify(myCloudChallenges);
+    myCloudChallenges = fresh;
+    if (changed && state.view === 'challenges') render();
+  } catch (e) { /* offline etc. — local list still shows */ }
+  fetchingMyChallenges = false;
+}
+// joined challenges: check if the creator added words since I last opened the lobby
+let joinedNew = {};
+let fetchingJoinedUpdates = false;
+async function fetchJoinedUpdates() {
+  if (!db || !user || fetchingJoinedUpdates || !joinedChallenges.length) return;
+  fetchingJoinedUpdates = true;
+  try {
+    let changed = false, touchedSeen = false;
+    for (const j of joinedChallenges) {
+      const d = await db.collection('challenges').doc(j.code).get();
+      if (!d.exists) continue;
+      if (!j.seen) { j.seen = Date.now(); touchedSeen = true; } // legacy entries: start counting from now
+      const isNew = (d.data().cardsUpdatedAt || 0) > j.seen;
+      if (!!joinedNew[j.code] !== isNew) { joinedNew[j.code] = isNew; changed = true; }
+    }
+    if (touchedSeen) saveJoined();
+    if (changed && state.view === 'challenges') render();
+  } catch (e) { /* offline — just no badges */ }
+  fetchingJoinedUpdates = false;
+}
+function deleteChallenge(code) {
+  const m = (myCloudChallenges || []).find(c => c.code === code);
+  showDangerDialog('🗑', 'Delete challenge?',
+    `Delete <strong>${esc(m ? m.title : '')}</strong> (${fmtCode(code)})?<br>The leaderboard disappears for everyone. This can't be undone.`,
+    'Delete', async () => {
+      try { await db.collection('challenges').doc(code).delete(); }
+      catch (e) { toast('Could not delete: ' + e.message); return; }
+      myCloudChallenges = (myCloudChallenges || []).filter(c => c.code !== code);
+      let touched = false;
+      for (const s of sets) if (s.challengeCode === code) { delete s.challengeCode; touched = true; }
+      if (touched) saveSets();
+      toast('Challenge deleted');
+      render();
+    });
+}
 function renderChallenges() {
   let inner;
   if (!FIREBASE_ENABLED || !user) {
     inner = `<div class="empty-state"><div class="big">🏆</div><p>Sign in to create and join challenges.</p><br><button class="btn" onclick="go('login')">Sign in</button></div>`;
   } else {
+    fetchMyChallenges(); // refresh in the background; re-renders if anything changed
+    fetchJoinedUpdates(); // "new words" badges for joined challenges
     const mine = sets.filter(s => s.challengeCode).map(s => ({ code: s.challengeCode, title: s.title }));
-    const joined = joinedChallenges.filter(j => !mine.some(m => m.code === j.code));
-    const row = (c, removable) => `
+    for (const c of (myCloudChallenges || [])) {
+      if (!mine.some(m => m.code === c.code)) mine.push(c);
+    }
+    const joined = joinedChallenges
+      .filter(j => !mine.some(m => m.code === j.code))
+      .map(j => ({ ...j, isNew: !!joinedNew[j.code] }));
+    const row = (c, removable, deletable) => `
       <div class="set-card" onclick="openChallengeByCode('${c.code}')">
         <div>
-          <h3>${esc(c.title)}</h3>
-          <div class="meta">🏆 ${fmtCode(c.code)}${c.by ? ' · by ' + esc(c.by) : ''}</div>
+          <h3>${c.isNew ? '<span class="new-dot"></span>' : ''}${esc(c.title)}</h3>
+          <div class="meta">🏆 ${fmtCode(c.code)}${c.by ? ' · by ' + esc(c.by) : ''}${c.isNew ? ' · <span class="new-words">✨ New words!</span>' : ''}</div>
         </div>
         ${removable ? `<button class="icon-btn" title="Remove" onclick="event.stopPropagation(); removeJoined('${c.code}')">✕</button>` : ''}
+        ${deletable ? `<button class="icon-btn" title="Delete challenge" onclick="event.stopPropagation(); deleteChallenge('${c.code}')">✕</button>` : ''}
       </div>`;
     inner = `
       <div class="section-title">My challenges</div>
-      ${mine.length ? mine.map(c => row(c, false)).join('') : '<div class="empty-list">Create one from any set with the 🏆 Challenge button</div>'}
+      ${mine.length ? mine.map(c => row(c, false, true)).join('') : '<div class="empty-list">Create one from any set with the 🏆 Challenge button</div>'}
       <div class="section-title">Joined</div>
       ${joined.length ? joined.map(c => row(c, true)).join('') : '<div class="empty-list">Enter a friend\'s code below to join</div>'}
       <button class="btn secondary full" style="margin-top:8px;" onclick="joinSet()">🔗 Enter a code</button>`;
@@ -1287,12 +1410,26 @@ function renderChallengeLobby() {
     <div class="set-title">🏆 ${esc(d.title)}</div>
     <div class="set-sub">${(d.cards || []).length} words · Challenge${d.creatorName ? ' · by ' + esc(d.creatorName) : ''}</div>
     <button class="btn secondary small" style="margin-top:10px;" onclick="showChallengeCode(lobby.code)">📋 ${fmtCode(lobby.code)} · Copy</button>
-    <button class="challenge-cta" onclick="startChallenge(lobby.code, lobby.data)">
-      <span class="cta-title">⚔️ Accept the Challenge</span>
-      <span class="cta-sub">${ctaSub}</span>
-    </button>
     <div class="section-title">🏆 Leaderboard</div>
-    <div id="lobby-board">${boardHTML(d.scores)}</div>`;
+    <div id="lobby-board">${boardHTML(d.scores)}</div>
+    <div style="height:96px;"></div>
+    <div class="cta-dock">
+      <button class="challenge-cta" onclick="startChallenge(lobby.code, lobby.data)">
+        <span class="cta-title">⚔️ Accept the Challenge</span>
+        <span class="cta-sub">${ctaSub}</span>
+      </button>
+    </div>`;
+  positionCtaDock();
+}
+/* keep the fixed CTA sitting right above the bottom navbar on mobile */
+function positionCtaDock() {
+  requestAnimationFrame(() => {
+    const dock = document.querySelector('.cta-dock');
+    const nav = document.getElementById('navbar');
+    if (!dock) return;
+    const navAtBottom = nav && nav.style.display !== 'none' && window.innerWidth < 700;
+    dock.style.bottom = navAtBottom ? nav.offsetHeight + 'px' : '0px';
+  });
 }
 function exitChallenge() {
   if (lobby && qz && qz.challenge && lobby.code === qz.challenge.code) {
@@ -2921,8 +3058,12 @@ if (FIREBASE_ENABLED) {
   firebase.auth().onAuthStateChanged(async u => {
     const wasSignedIn = !!user;
     user = u;
+    myCloudChallenges = null; // never show another account's challenge list
+    challengeSig = {};
+    joinedNew = {};
     if (u) {
       await loadCloudSets();
+      fetchMyChallenges(); // seed the card-content cache so set edits sync to my challenges
       if (maybeDemo()) return;
       go('home');
       toast('Signed in as ' + u.email);
