@@ -422,6 +422,43 @@
   }
   .chip.active { background: #dfe5ff; border-color: #dfe5ff; color: var(--primary); }
   .empty-list { text-align: center; color: var(--muted); padding: 28px 12px; font-size: 15px; }
+  .challenge-cta {
+    width: 100%; border: none; cursor: pointer; border-radius: 18px;
+    padding: 18px 20px; margin: 18px 0;
+    background: linear-gradient(135deg, #5b6bff, #3a2fd4);
+    color: #ffffff; font-family: inherit; text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    position: relative; overflow: hidden;
+    animation: ctaPulse 2.2s ease-in-out infinite;
+  }
+  .challenge-cta:active { transform: scale(.97); }
+  @keyframes ctaPulse {
+    0%, 100% { box-shadow: 0 8px 22px rgba(66,85,255,.35); transform: scale(1); }
+    50% { box-shadow: 0 12px 32px rgba(66,85,255,.55); transform: scale(1.015); }
+  }
+  .challenge-cta::after {
+    content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+    background: linear-gradient(120deg, transparent, rgba(255,255,255,.35), transparent);
+    transform: skewX(-20deg);
+    animation: ctaShine 2.8s ease-in-out infinite;
+  }
+  @keyframes ctaShine { 0% { left: -60%; } 45%, 100% { left: 130%; } }
+  .cta-title { font-size: 20px; font-weight: 800; letter-spacing: .3px; }
+  .cta-sub { font-size: 13.5px; font-weight: 600; opacity: .92; }
+  .home-chips {
+    display: flex; gap: 8px; margin-bottom: 14px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .home-chips::-webkit-scrollbar { display: none; }
+  .hchip {
+    flex-shrink: 0; display: inline-flex; align-items: center; gap: 7px;
+    padding: 9px 14px; border-radius: 999px;
+    border: 1.5px solid var(--border); background: var(--card); color: var(--text);
+    font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer;
+  }
+  .hchip.active { background: #dfe5ff; border-color: #dfe5ff; color: var(--primary); }
+  .hchip svg { flex-shrink: 0; display: block; }
   .empty-list .btn { margin-top: 12px; }
 
   /* ---------- Spelling hint ---------- */
@@ -1235,13 +1272,25 @@ function renderChallenges() {
 function renderChallengeLobby() {
   if (!lobby) return go('home');
   const d = lobby.data;
+  // trash-talk line based on the current leaderboard
+  const entries = Object.entries(d.scores || {}).map(([u, v]) => ({ uid: u, ...v }));
+  entries.sort((a, b) => b.pct - a.pct || a.at - b.at);
+  let ctaSub = 'Be the first on the leaderboard! 🚀';
+  if (entries.length) {
+    const top = entries[0];
+    ctaSub = (user && top.uid === user.uid)
+      ? 'You\'re #1 — defend your crown! 👑'
+      : `Can you beat 🥇 ${esc(top.name || 'Player')}'s ${top.pct}%?`;
+  }
   app.innerHTML = `
     <div class="back" onclick="go('challenges')">← Challenges</div>
     <div class="set-title">🏆 ${esc(d.title)}</div>
     <div class="set-sub">${(d.cards || []).length} words · Challenge${d.creatorName ? ' · by ' + esc(d.creatorName) : ''}</div>
-    <div style="margin:18px 0;">
-      <button class="btn full" onclick="startChallenge(lobby.code, lobby.data)">🎮 Start quiz</button>
-    </div>
+    <button class="btn secondary small" style="margin-top:10px;" onclick="showChallengeCode(lobby.code)">📋 ${fmtCode(lobby.code)} · Copy</button>
+    <button class="challenge-cta" onclick="startChallenge(lobby.code, lobby.data)">
+      <span class="cta-title">⚔️ Accept the Challenge</span>
+      <span class="cta-sub">${ctaSub}</span>
+    </button>
     <div class="section-title">🏆 Leaderboard</div>
     <div id="lobby-board">${boardHTML(d.scores)}</div>`;
 }
@@ -1429,16 +1478,12 @@ function renderHome() {
         <button class="btn small" onclick="openEditor()">＋ New set</button>
       </div>
     </header>
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-      <div class="section-title" style="margin:0;">Your study sets</div>
-      <select id="home-filter" class="mini-select" style="padding-top:8px; padding-bottom:8px;" onchange="homeFilter=this.value; render()">
-        <option value="all">All</option>
-        <option value="mine">My sets</option>
-        <option value="sharedByMe">👥 Shared by me</option>
-        <option value="sharedToMe">🤝 Shared with me</option>
-      </select>
-    </div>
-    <div style="height:12px"></div>`;
+    <div class="section-title">Your study sets</div>
+    <div class="home-chips">
+      ${[['all', 'All', 'apps'], ['mine', 'Mine', 'person'], ['sharedByMe', 'Sharing', 'share'], ['sharedToMe', 'Joined', 'group']]
+        .map(([val, label, icon]) => `
+        <button class="hchip ${homeFilter === val ? 'active' : ''}" onclick="homeFilter='${val}'; render()">${hIcon(icon)}${label}</button>`).join('')}
+    </div>`;
   const visibleSets = sets.filter(s => {
     if (homeFilter === 'mine') return isSetOwner(s); // my own sets, including ones I shared
     if (homeFilter === 'sharedByMe') return s.shared && isSetOwner(s);
@@ -1471,9 +1516,21 @@ function renderHome() {
     }
   }
   app.innerHTML = html;
-  const hf = document.getElementById('home-filter');
-  if (hf) hf.value = homeFilter;
   initSetDrag();
+}
+/* Material-style inline icons for the filter chips (stroke follows text color) */
+function hIcon(name) {
+  const s = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  if (name === 'apps') {
+    let r = '';
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+      r += `<rect x="${3 + j * 7}" y="${3 + i * 7}" width="4.6" height="4.6" rx="1.2" fill="currentColor"/>`;
+    return `<svg width="14" height="14" viewBox="0 0 24 24">${r}</svg>`;
+  }
+  if (name === 'person') return `<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="4" ${s}/><path d="M4 20 q8 -9 16 0" ${s}/></svg>`;
+  if (name === 'share') return `<svg width="16" height="16" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="12" rx="2" ${s}/><line x1="12" y1="15" x2="12" y2="2.5" ${s}/><path d="M8 6 l4 -4 4 4" ${s}/></svg>`;
+  if (name === 'group') return `<svg width="17" height="16" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5" ${s}/><path d="M2.5 20 q6.5 -7.5 13 0" ${s}/><line x1="17" y1="9.5" x2="22" y2="9.5" ${s}/><line x1="19.5" y1="7" x2="19.5" y2="12" ${s}/></svg>`;
+  return '';
 }
 
 /* ----- Long-press drag to reorder sets ----- */
@@ -2830,6 +2887,32 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
+/* ----- Demo preview mode: open the app with #demo-lobby to inspect the challenge lobby with sample data ----- */
+function maybeDemo() {
+  if (location.hash !== '#demo-lobby') return false;
+  lobby = {
+    code: 'CDEMO123',
+    data: {
+      title: 'Demo Challenge',
+      creatorName: 'aaagoodaaa',
+      cards: [
+        { term: 'symphony', def: '交響樂' }, { term: 'gratitude', def: '感謝' },
+        { term: 'feasible', def: '可行的' }, { term: 'candid', def: '坦率的' },
+        { term: 'diligent', def: '勤奮的' }, { term: 'eloquent', def: '雄辯的' }
+      ],
+      scores: {
+        u1: { name: 'wendytree2002', pct: 100, score: 6, total: 6, at: 1 },
+        u2: { name: '涼麵', pct: 83, score: 5, total: 6, at: 2 },
+        u3: { name: 'joliandrose', pct: 67, score: 4, total: 6, at: 3 }
+      }
+    }
+  };
+  state = { view: 'challengeLobby' };
+  render();
+  return true;
+}
+window.addEventListener('hashchange', maybeDemo);
+
 /* ----- Init ----- */
 if (FIREBASE_ENABLED) {
   firebase.initializeApp(FIREBASE_CONFIG);
@@ -2840,6 +2923,7 @@ if (FIREBASE_ENABLED) {
     user = u;
     if (u) {
       await loadCloudSets();
+      if (maybeDemo()) return;
       go('home');
       toast('Signed in as ' + u.email);
     } else {
@@ -2858,12 +2942,13 @@ if (FIREBASE_ENABLED) {
       }
       sharedRefs = [];
       joinedChallenges = [];
+      if (maybeDemo()) return;
       if (wasSignedIn) { toast('Signed out'); go('login'); }
       else render();
     }
   });
 } else {
-  render();
+  if (!maybeDemo()) render();
 }
 </script>
 </body>
