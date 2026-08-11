@@ -71,7 +71,10 @@
   /* ---------- Header ---------- */
   header {
     display:flex; align-items:center; justify-content:space-between;
-    margin-bottom: 20px; flex-wrap: wrap; gap: 10px;
+    margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+    background: var(--bg); padding: 6px 0 12px;
+    box-shadow: 0 -24px 0 0 var(--bg); /* covers the page's top padding while content scrolls under */
   }
   header > div:last-child { flex-wrap: wrap; }
   .logo { font-size: 22px; font-weight: 800; color: var(--primary); letter-spacing:-.5px; cursor:pointer; }
@@ -225,9 +228,19 @@
   .flip-card { z-index: 1; }
   .flip-card {
     position: relative; width: 100%; height: 340px;
+    /* fill the space between the header area and the bottom-docked controls */
+    height: clamp(300px, calc(100dvh - env(safe-area-inset-top, 0px) - 345px), 620px);
     transform-style: preserve-3d; transition: transform .45s cubic-bezier(.4,.1,.2,1);
     cursor:pointer;
   }
+  /* flashcard controls pinned to the bottom of the screen */
+  .fc-dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    padding: 10px 16px calc(env(safe-area-inset-bottom, 0px) + 14px);
+    background: var(--bg);
+  }
+  .fc-dock > div { max-width: 608px; margin-left: auto; margin-right: auto; }
+  body.fc-view #app { padding-bottom: 190px; } /* keep content clear of the dock */
   .flip-card.flipped { transform: rotateX(180deg); }
   .flip-face {
     position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden;
@@ -449,6 +462,24 @@
   @keyframes ctaShine { 0% { left: -60%; } 45%, 100% { left: 130%; } }
   .cta-title { font-size: 20px; font-weight: 800; letter-spacing: .3px; }
   .cta-sub { font-size: 13.5px; font-weight: 600; opacity: .92; }
+  /* global search results */
+  mark { background: #ffe9a8; color: inherit; border-radius: 3px; padding: 0 1px; }
+  .search-hit { cursor: pointer; }
+  .search-hit:active { transform: scale(.99); }
+  .search-hit .def { color: var(--muted); font-size: 14px; margin-top: 2px; }
+  .hit-set {
+    flex-shrink: 0; align-self: flex-start;
+    font-size: 12.5px; font-weight: 700; color: var(--primary);
+    max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* banner shown inside IG/LINE/FB in-app browsers */
+  .iab-banner {
+    background: #fff7e0; border: 1.5px solid #f5c98a; border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 16px; font-size: 14px; line-height: 1.5;
+  }
+  .iab-banner .iab-title { font-weight: 800; margin-bottom: 4px; }
+  .iab-banner .iab-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .iab-banner a.btn { text-decoration: none; }
   /* unread-mail style badge for challenges with new words */
   .new-dot {
     display: inline-block; width: 9px; height: 9px; border-radius: 50%;
@@ -955,11 +986,13 @@ function autoTranslate(termInput, i) {
 /* =====================  Views  ===================== */
 function render() {
   const v = state.view;
+  document.body.classList.toggle('fc-view', v === 'flashcards' && fc && !fc.done);
   if (v === 'login') renderLogin();
   else if (v === 'home') renderHome();
   else if (v === 'account') renderAccount();
   else if (v === 'challengeLobby') renderChallengeLobby();
   else if (v === 'challenges') renderChallenges();
+  else if (v === 'search') renderSearch();
   else if (v === 'set') renderSet();
   else if (v === 'flashcards') renderFlashcards();
   else if (v === 'quiz') renderQuiz();
@@ -986,11 +1019,12 @@ window.addEventListener('resize', () => {
 function renderNav() {
   const nav = document.getElementById('navbar');
   if (!nav) return;
-  const visible = ['home', 'set', 'account', 'quizResult', 'challengeLobby', 'challenges'].includes(state.view);
+  const visible = ['home', 'set', 'account', 'quizResult', 'challengeLobby', 'challenges', 'search'].includes(state.view);
   document.body.classList.toggle('nav-visible', visible);
   nav.style.display = visible ? '' : 'none';
   if (!visible) return;
   const active = state.view === 'account' ? 'account'
+    : state.view === 'search' ? 'search'
     : (state.view === 'challenges' || state.view === 'challengeLobby') ? 'challenges'
     : 'sets';
   nav.innerHTML = `
@@ -1001,7 +1035,7 @@ function renderNav() {
     <div class="nav-tabs">
       <button class="nav-item ${active === 'sets' ? 'active' : ''}" onclick="go('home')"><span class="nicon">📚</span>Sets</button>
       <button class="nav-item ${active === 'challenges' ? 'active' : ''}" onclick="go('challenges')"><span class="nicon">🏆</span>Challenges</button>
-      <button class="nav-item" onclick="openEditor()"><span class="nicon">➕</span>Create</button>
+      <button class="nav-item ${active === 'search' ? 'active' : ''}" onclick="go('search')"><span class="nicon">🔍</span>Search</button>
       <button class="nav-item ${active === 'account' ? 'active' : ''}" onclick="go('account')"><span class="nicon">👤</span>Account</button>
     </div>
     <div class="nav-cta">
@@ -1048,19 +1082,31 @@ function renderAccount() {
 /* ----- Login ----- */
 function renderLogin() {
   const su = !!state.signup;
+  const iab = inAppUA();
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const iabBanner = !iab ? '' : `
+    <div class="iab-banner">
+      <div class="iab-title">⚠️ You're inside ${iab}'s built-in browser</div>
+      <div>Google sign-in doesn't work here. Open this page in your real browser${isAndroid ? '' : ' (tap <strong>⋯</strong> or <strong>↗</strong> → "Open in browser")'} — or sign in with email below, which works fine.</div>
+      <div class="iab-actions">
+        ${isAndroid ? `<a class="btn small" href="intent://liangfromtaiwan.github.io/StudyCards/#Intent;scheme=https;S.browser_fallback_url=https%3A%2F%2Fliangfromtaiwan.github.io%2FStudyCards%2F;end">Open in browser</a>` : ''}
+        <button class="btn secondary small" onclick="copyAppLink()">📋 Copy link</button>
+      </div>
+    </div>`;
   app.innerHTML = `
     <header><div class="logo">Study<span>Cards</span></div></header>
+    ${iabBanner}
     <div class="auth-card">
       <h2>${su ? 'Create your account' : 'Welcome back'}</h2>
       <div class="auth-sub">${su ? 'Sign up to sync your study sets across all your devices.' : 'Sign in to access your study sets on any device.'}</div>
       <div class="field"><label>Email</label><input type="email" id="auth-email" placeholder="you@example.com" autocomplete="username"></div>
       <div class="field"><label>Password</label><input type="password" id="auth-pw" placeholder="At least 6 characters" autocomplete="${su ? 'new-password' : 'current-password'}" onkeydown="if(event.key==='Enter')doAuth(${su})"></div>
       <button class="btn full" onclick="doAuth(${su})">${su ? 'Create account' : 'Sign in'}</button>
-      <div class="auth-divider"><span>or</span></div>
+      ${iab ? '' : `<div class="auth-divider"><span>or</span></div>
       <button class="btn secondary full" onclick="doGoogleAuth()">
         <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
         Continue with Google
-      </button>
+      </button>`}
       <div class="auth-links">
         <a onclick="go('login',{signup:${!su}})">${su ? 'Already have an account? Sign in' : 'New here? Create an account'}</a>
         ${su ? '' : `<a onclick="doReset()">Forgot password?</a>`}
@@ -1324,6 +1370,7 @@ async function fetchMyChallenges() {
   fetchingMyChallenges = false;
 }
 // joined challenges: check if the creator added words since I last opened the lobby
+let challengeFilter = 'mine'; // Challenges page tab: 'mine' | 'joined'
 let joinedNew = {};
 let fetchingJoinedUpdates = false;
 async function fetchJoinedUpdates() {
@@ -1381,16 +1428,85 @@ function renderChallenges() {
         ${removable ? `<button class="icon-btn" title="Remove" onclick="event.stopPropagation(); removeJoined('${c.code}')">✕</button>` : ''}
         ${deletable ? `<button class="icon-btn" title="Delete challenge" onclick="event.stopPropagation(); deleteChallenge('${c.code}')">✕</button>` : ''}
       </div>`;
+    const joinedHasNew = joined.some(j => j.isNew);
     inner = `
-      <div class="section-title">My challenges</div>
-      ${mine.length ? mine.map(c => row(c, false, true)).join('') : '<div class="empty-list">Create one from any set with the 🏆 Challenge button</div>'}
-      <div class="section-title">Joined</div>
-      ${joined.length ? joined.map(c => row(c, true)).join('') : '<div class="empty-list">Enter a friend\'s code below to join</div>'}
+      <div class="home-chips">
+        <button class="hchip ${challengeFilter === 'mine' ? 'active' : ''}" onclick="challengeFilter='mine'; render()">${hIcon('person')}My challenges</button>
+        <button class="hchip ${challengeFilter === 'joined' ? 'active' : ''}" onclick="challengeFilter='joined'; render()">${hIcon('group')}Joined${joinedHasNew ? '<span class="new-dot" style="margin:0 0 0 7px;"></span>' : ''}</button>
+      </div>
+      ${challengeFilter === 'mine'
+        ? (mine.length ? mine.map(c => row(c, false, true)).join('') : '<div class="empty-list">Create one from any set with the 🏆 Challenge button</div>')
+        : (joined.length ? joined.map(c => row(c, true)).join('') : '<div class="empty-list">Enter a friend\'s code below to join</div>')}
       <button class="btn secondary full" style="margin-top:8px;" onclick="joinSet()">🔗 Enter a code</button>`;
   }
   app.innerHTML = `
     <header><div class="logo" onclick="go('home')">Study<span>Cards</span></div></header>
     ${inner}`;
+}
+/* ----- Global search: find a word across every set ----- */
+let globalQuery = '';
+function hl(text, q) {
+  const t = esc(text || '');
+  if (!q) return t;
+  const re = new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig');
+  return t.replace(re, m => `<mark>${m}</mark>`);
+}
+function renderSearch() {
+  app.innerHTML = `
+    <header><div class="logo" onclick="go('home')">Study<span>Cards</span></div></header>
+    <div class="section-title">Search all sets</div>
+    <div class="term-toolbar">
+      <div class="search-wrap">
+        <input type="text" id="global-search" placeholder="Search every set…" autocapitalize="off" value="${esc(globalQuery)}"
+          oninput="globalQuery=this.value; renderGlobalResults(); document.getElementById('global-clear').style.display=this.value?'':'none'">
+        <button class="clear-btn" id="global-clear" title="Clear" style="display:${globalQuery ? '' : 'none'}"
+          onclick="globalQuery=''; document.getElementById('global-search').value=''; this.style.display='none'; renderGlobalResults(); document.getElementById('global-search').focus()">✕</button>
+      </div>
+    </div>
+    <div id="global-results"></div>`;
+  renderGlobalResults();
+  const inp = document.getElementById('global-search');
+  if (inp && !globalQuery) inp.focus();
+}
+function renderGlobalResults() {
+  const el = document.getElementById('global-results');
+  if (!el) return;
+  const q = globalQuery.trim().toLowerCase();
+  if (!q) {
+    el.innerHTML = `<div class="empty-state"><div class="big">🔍</div><p>Type a word to search across<br>all your sets at once.</p></div>`;
+    return;
+  }
+  const hits = [];
+  for (const s of sets) {
+    for (const c of s.cards) {
+      if ((c.term || '').toLowerCase().includes(q) || (c.def || '').toLowerCase().includes(q) || (c.example || '').toLowerCase().includes(q)) {
+        hits.push({ s, c });
+        if (hits.length >= 100) break;
+      }
+    }
+    if (hits.length >= 100) break;
+  }
+  if (!hits.length) {
+    el.innerHTML = `<div class="empty-list">No matches for “${esc(globalQuery.trim())}” in any set.</div>`;
+    return;
+  }
+  const qRaw = globalQuery.trim();
+  el.innerHTML = hits.map(({ s, c }) => `
+    <div class="term-row search-hit" onclick="openSearchHit('${s.id}')">
+      <div style="flex:1; min-width:0;">
+        <div class="term">${hl(c.term, qRaw)}</div>
+        <div class="def">${hl(c.def, qRaw)}</div>
+        ${c.example ? `<div class="row-example" style="padding-top:6px;">${hl(c.example, qRaw)}</div>` : ''}
+      </div>
+      <div class="hit-set">📚 ${esc(s.title)}</div>
+    </div>`).join('');
+}
+function openSearchHit(setId) {
+  // open the set pre-filtered to the search, so the card is right there
+  termQuery = globalQuery.trim();
+  termFilter = 'all';
+  lastTermViewSet = setId;
+  go('set', { setId });
 }
 function renderChallengeLobby() {
   if (!lobby) return go('home');
@@ -2232,17 +2348,19 @@ function renderFlashcards() {
         <div class="flip-face backside"><div class="hint">Definition</div>${speakBtn(card.def, APP_LANG)}<div>${esc(card.def)}${card.example ? `<div class="fc-example">${esc(card.example)} ${speakBtn(card.example, termLang())}</div>` : ''}</div></div>
       </div>
     </div>
-    <div class="fc-controls">
-      <button class="nav-btn" onclick="moveFc(-1)" ${fc.i === 0 ? 'disabled' : ''}>←</button>
-      <div class="progress-text">${fc.i + 1} / ${fc.order.length}</div>
-      <button class="nav-btn" onclick="moveFc(1)" ${fc.i === fc.order.length - 1 ? 'disabled' : ''}>→</button>
-    </div>
-    <div class="progress-bar" style="margin:20px 0 0"><div class="fill" style="width:${pct}%"></div></div>
-    <div class="fc-tip">Tap the card to flip</div>
-    ${fc.i === fc.order.length - 1 ? `
-    <div style="text-align:center; margin-top:24px;">
-      <button class="btn" onclick="go('set',{setId:'${s.id}'})">← Back to set</button>
-    </div>` : ''}`;
+    <div class="fc-dock">
+      ${fc.i === fc.order.length - 1 ? `
+      <div style="text-align:center; margin-bottom:10px;">
+        <button class="btn" onclick="go('set',{setId:'${s.id}'})">← Back to set</button>
+      </div>` : ''}
+      <div class="fc-tip" style="margin:0 0 8px;">Tap the card to flip</div>
+      <div class="fc-controls">
+        <button class="nav-btn" onclick="moveFc(-1)" ${fc.i === 0 ? 'disabled' : ''}>←</button>
+        <div class="progress-text">${fc.i + 1} / ${fc.order.length}</div>
+        <button class="nav-btn" onclick="moveFc(1)" ${fc.i === fc.order.length - 1 ? 'disabled' : ''}>→</button>
+      </div>
+      <div class="progress-bar" style="margin:14px 0 0"><div class="fill" style="width:${pct}%"></div></div>
+    </div>`;
   initFcSwipe();
 }
 /* Swipe the card: right = know it, left = still learning (Quizlet-style) */
@@ -3022,6 +3140,34 @@ document.addEventListener('keydown', e => {
 /* ----- PWA service worker ----- */
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+/* ----- In-app browsers (IG / LINE / FB…) break Google sign-in ----- */
+// LINE has an official escape hatch: reload the URL with openExternalBrowser=1
+// and LINE opens the page in the real browser automatically.
+(function () {
+  if (/Line\//i.test(navigator.userAgent) && !/openExternalBrowser=1/.test(location.href)) {
+    const sep = location.search ? '&' : '?';
+    location.replace(location.origin + location.pathname + location.search + sep + 'openExternalBrowser=1' + location.hash);
+  }
+})();
+function inAppUA() {
+  const ua = navigator.userAgent || '';
+  if (/Line\//i.test(ua)) return 'LINE';
+  if (/Instagram/i.test(ua)) return 'Instagram';
+  if (/FB_IAB|FBAN|FBAV/i.test(ua)) return 'Facebook';
+  if (/Messenger/i.test(ua)) return 'Messenger';
+  if (/MicroMessenger/i.test(ua)) return 'WeChat';
+  if (/musical_ly|Bytedance|TikTok/i.test(ua)) return 'TikTok';
+  return null;
+}
+async function copyAppLink() {
+  try {
+    await navigator.clipboard.writeText('https://liangfromtaiwan.github.io/StudyCards/');
+    toast('Link copied — paste it in Safari or Chrome');
+  } catch (e) {
+    prompt('Copy this link and open it in Safari or Chrome:', 'https://liangfromtaiwan.github.io/StudyCards/');
+  }
 }
 
 /* ----- Demo preview mode: open the app with #demo-lobby to inspect the challenge lobby with sample data ----- */
