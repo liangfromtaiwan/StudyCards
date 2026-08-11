@@ -1377,7 +1377,7 @@ async function fetchMyChallenges() {
   fetchingMyChallenges = false;
 }
 // joined challenges: check if the creator added words since I last opened the lobby
-let challengeFilter = 'mine'; // Challenges page tab: 'mine' | 'joined'
+let challengeFilter = 'joined'; // Challenges page tab: 'joined' (default) | 'mine'
 let joinedNew = {};
 let fetchingJoinedUpdates = false;
 async function fetchJoinedUpdates() {
@@ -1438,8 +1438,8 @@ function renderChallenges() {
     const joinedHasNew = joined.some(j => j.isNew);
     inner = `
       <div class="home-chips">
-        <button class="hchip ${challengeFilter === 'mine' ? 'active' : ''}" onclick="challengeFilter='mine'; render()">${hIcon('person')}My challenges</button>
         <button class="hchip ${challengeFilter === 'joined' ? 'active' : ''}" onclick="challengeFilter='joined'; render()">${hIcon('group')}Joined${joinedHasNew ? '<span class="new-dot" style="margin:0 0 0 7px;"></span>' : ''}</button>
+        <button class="hchip ${challengeFilter === 'mine' ? 'active' : ''}" onclick="challengeFilter='mine'; render()">${hIcon('person')}My challenges</button>
       </div>
       ${challengeFilter === 'mine'
         ? (mine.length ? mine.map(c => row(c, false, true)).join('') : '<div class="empty-list">Create one from any set with the 🏆 Challenge button</div>')
