@@ -757,6 +757,97 @@ let sets = loadSets();
 let user = null, db = null;
 let sharedRefs = [];
 let joinedChallenges = []; // [{code, title}]
+/* ----- Folders: organize sets into groups ----- */
+function loadFolders() {
+  try { return JSON.parse(localStorage.getItem('studycards.folders')) || []; } catch (e) { return []; }
+}
+let folders = loadFolders(); // [{id, name, sets: [setId]}]
+function saveFolders() {
+  try { localStorage.setItem('studycards.folders', JSON.stringify(folders)); } catch (e) {}
+  if (user && db) db.collection('users').doc(user.uid).set({ folders }, { merge: true }).catch(() => {});
+}
+function newFolder() {
+  const name = (prompt('Folder name:') || '').trim();
+  if (!name) return;
+  const f = { id: uid(), name, sets: [] };
+  folders.push(f);
+  saveFolders();
+  go('folder', { folderId: f.id });
+}
+function renameFolder(id) {
+  const f = folders.find(x => x.id === id);
+  if (!f) return;
+  const name = (prompt('Folder name:', f.name) || '').trim();
+  if (!name || name === f.name) return;
+  f.name = name;
+  saveFolders();
+  render();
+}
+function deleteFolder(id) {
+  const f = folders.find(x => x.id === id);
+  if (!f) return;
+  showDangerDialog('🗑', 'Delete folder?',
+    `Delete <strong>${esc(f.name)}</strong>?<br>The sets inside are <strong>not</strong> deleted — they stay in your library.`,
+    'Delete', () => {
+      folders = folders.filter(x => x.id !== id);
+      saveFolders();
+      go('home');
+    });
+}
+function addSetToFolder(folderId, setId) {
+  const f = folders.find(x => x.id === folderId);
+  if (!f || f.sets.includes(setId)) return;
+  f.sets.push(setId);
+  saveFolders();
+  render();
+}
+function removeFromFolder(folderId, setId) {
+  const f = folders.find(x => x.id === folderId);
+  if (!f) return;
+  f.sets = f.sets.filter(id => id !== setId);
+  saveFolders();
+  render();
+}
+function renderFolder() {
+  const f = folders.find(x => x.id === state.folderId);
+  if (!f) return go('home');
+  const before = f.sets.length;
+  f.sets = f.sets.filter(id => getSet(id)); // prune sets that were deleted
+  if (f.sets.length !== before) saveFolders();
+  const inFolder = f.sets.map(id => getSet(id));
+  const candidates = sets.filter(s => !f.sets.includes(s.id));
+  let html = `
+    <div class="back" onclick="go('home')">← All sets</div>
+    <div class="sticky-head" style="align-items:center;">
+      <div class="set-title" style="margin-bottom:0">📁 ${esc(f.name)}</div>
+      <button class="btn small" style="flex-shrink:0" onclick="renameFolder('${f.id}')">✎ Rename</button>
+    </div>
+    <div class="set-sub">${inFolder.length} sets</div>
+    <div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
+      <button class="btn secondary small" onclick="state.addingToFolder=!state.addingToFolder; render()">${state.addingToFolder ? '✓ Done' : '➕ Add existing set'}</button>
+      <button class="btn secondary small" onclick="openEditor(null, '${f.id}')">✨ New set</button>
+      <button class="btn danger small" onclick="deleteFolder('${f.id}')">🗑 Delete folder</button>
+    </div>`;
+  if (state.addingToFolder) {
+    html += `<div class="section-title">Tap a set to add it</div>`;
+    html += candidates.length ? candidates.map(s => `
+      <div class="set-card" onclick="addSetToFolder('${f.id}','${s.id}')">
+        <div><h3>${esc(s.title)}</h3><div class="meta">${s.cards.length} terms</div></div>
+        <span style="color:var(--primary); font-weight:800;">＋</span>
+      </div>`).join('') : '<div class="empty-list">Every set is already in this folder.</div>';
+  } else {
+    html += `<div class="section-title">Sets in this folder</div>`;
+    html += inFolder.length ? inFolder.map(s => `
+      <div class="set-card" onclick="go('set',{setId:'${s.id}'})">
+        <div>
+          <h3>${esc(s.title)}</h3>
+          <div class="meta">${s.cards.length} terms${s.shared ? (isSetOwner(s) ? ' · 👥 Shared by me' : ' · 🤝 Shared with me') : ''}</div>
+        </div>
+        <button class="icon-btn" title="Remove from folder" onclick="event.stopPropagation(); removeFromFolder('${f.id}','${s.id}')">✕</button>
+      </div>`).join('') : '<div class="empty-list">No sets yet — add an existing set or create a new one above.</div>';
+  }
+  app.innerHTML = html;
+}
 function saveJoined() {
   if (user && db) db.collection('users').doc(user.uid).set({ joinedChallenges }, { merge: true }).catch(() => {});
 }
@@ -998,6 +1089,7 @@ function render() {
   else if (v === 'challengeLobby') renderChallengeLobby();
   else if (v === 'challenges') renderChallenges();
   else if (v === 'search') renderSearch();
+  else if (v === 'folder') renderFolder();
   else if (v === 'set') renderSet();
   else if (v === 'flashcards') renderFlashcards();
   else if (v === 'quiz') renderQuiz();
@@ -1026,7 +1118,7 @@ window.addEventListener('resize', () => {
 function renderNav() {
   const nav = document.getElementById('navbar');
   if (!nav) return;
-  const visible = ['home', 'set', 'account', 'quizResult', 'challengeLobby', 'challenges', 'search'].includes(state.view);
+  const visible = ['home', 'set', 'account', 'quizResult', 'challengeLobby', 'challenges', 'search', 'folder'].includes(state.view);
   document.body.classList.toggle('nav-visible', visible);
   nav.style.display = visible ? '' : 'none';
   if (!visible) return;
@@ -1176,6 +1268,12 @@ async function loadCloudSets() {
     const data = snap.exists ? snap.data() : null;
     sharedRefs = (data && Array.isArray(data.sharedRefs)) ? data.sharedRefs : [];
     joinedChallenges = (data && Array.isArray(data.joinedChallenges)) ? data.joinedChallenges : [];
+    if (data && Array.isArray(data.folders)) {
+      folders = data.folders;
+      try { localStorage.setItem('studycards.folders', JSON.stringify(folders)); } catch (e) {}
+    } else if (folders.length) {
+      saveFolders(); // first sign-in: push local folders to the cloud
+    }
     if (data && data.lang) {
       APP_LANG = data.lang;
       try { localStorage.setItem('studycards.lang', data.lang); } catch (e) {}
@@ -1740,10 +1838,22 @@ function renderHome() {
     </header>
     <div class="section-title">Your study sets</div>
     <div class="home-chips">
-      ${[['all', 'All', 'apps'], ['mine', 'Mine', 'person'], ['sharedByMe', 'Sharing', 'share'], ['sharedToMe', 'Joined', 'group']]
+      ${[['all', 'All', 'apps'], ['mine', 'Mine', 'person'], ['sharedByMe', 'Sharing', 'share'], ['sharedToMe', 'Joined', 'group'], ['folders', 'Folders', 'folder']]
         .map(([val, label, icon]) => `
         <button class="hchip ${homeFilter === val ? 'active' : ''}" onclick="homeFilter='${val}'; render()">${hIcon(icon)}${label}</button>`).join('')}
     </div>`;
+  if (homeFilter === 'folders') {
+    html += folders.length ? folders.map(f => `
+      <div class="set-card" onclick="go('folder',{folderId:'${f.id}'})">
+        <div>
+          <h3>📁 ${esc(f.name)}</h3>
+          <div class="meta">${f.sets.filter(id => getSet(id)).length} sets</div>
+        </div>
+      </div>`).join('') : `<div class="empty-list">Folders help you organize your sets — create your first one!</div>`;
+    html += `<button class="btn secondary full" style="margin-top:8px;" onclick="newFolder()">📁 ＋ New folder</button>`;
+    app.innerHTML = html;
+    return;
+  }
   const visibleSets = sets.filter(s => {
     if (homeFilter === 'mine') return isSetOwner(s); // my own sets, including ones I shared
     if (homeFilter === 'sharedByMe') return s.shared && isSetOwner(s);
@@ -1790,6 +1900,7 @@ function hIcon(name) {
   if (name === 'person') return `<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="4" ${s}/><path d="M4 20 q8 -9 16 0" ${s}/></svg>`;
   if (name === 'share') return `<svg width="16" height="16" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="12" rx="2" ${s}/><line x1="12" y1="15" x2="12" y2="2.5" ${s}/><path d="M8 6 l4 -4 4 4" ${s}/></svg>`;
   if (name === 'group') return `<svg width="17" height="16" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5" ${s}/><path d="M2.5 20 q6.5 -7.5 13 0" ${s}/><line x1="17" y1="9.5" x2="22" y2="9.5" ${s}/><line x1="19.5" y1="7" x2="19.5" y2="12" ${s}/></svg>`;
+  if (name === 'folder') return `<svg width="16" height="16" viewBox="0 0 24 24"><path d="M3 7 a2 2 0 0 1 2 -2 h4.5 l2 2.5 H19 a2 2 0 0 1 2 2 v8.5 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 z" ${s}/></svg>`;
   return '';
 }
 
@@ -2756,7 +2867,9 @@ function renderQuizResult() {
 
 /* ----- Editor ----- */
 let ed = null;
-function openEditor(setId) {
+let pendingFolderId = null; // when creating a set from inside a folder
+function openEditor(setId, folderId) {
+  pendingFolderId = folderId || null;
   edQuery = ''; edSort = 'new';
   if (setId) {
     const s = getSet(setId);
@@ -3006,6 +3119,11 @@ function saveEdit() {
     const s = { id: uid(), title, cards };
     sets.unshift(s);
     saveSets(); toast('Set created');
+    if (pendingFolderId) { // created from inside a folder — file it there
+      const f = folders.find(x => x.id === pendingFolderId);
+      if (f && !f.sets.includes(s.id)) { f.sets.unshift(s.id); saveFolders(); }
+      pendingFolderId = null;
+    }
     ed = null;
     go('set', { setId: s.id });
   }
@@ -3033,6 +3151,7 @@ function renderGhostPrev() {
   let prev;
   switch (state.view) {
     case 'set': prev = { view: 'home' }; break;
+    case 'folder': prev = { view: 'home' }; break;
     case 'flashcards':
     case 'quiz':
     case 'quizResult': prev = { view: 'set', setId: state.setId }; break;
@@ -3227,12 +3346,15 @@ if (FIREBASE_ENABLED) {
       try { owner = localStorage.getItem('studycards.owner') || 'local'; } catch (e) {}
       if (owner !== 'local') {
         sets = JSON.parse(JSON.stringify(SAMPLE_SETS));
+        folders = [];
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(sets));
           localStorage.setItem('studycards.owner', 'local');
+          localStorage.removeItem('studycards.folders');
         } catch (e) {}
       } else {
         sets = loadSets();
+        folders = loadFolders();
       }
       sharedRefs = [];
       joinedChallenges = [];
