@@ -838,7 +838,7 @@ function renderFolder() {
   } else {
     html += `<div class="section-title">Sets in this folder</div>`;
     html += inFolder.length ? inFolder.map(s => `
-      <div class="set-card" onclick="go('set',{setId:'${s.id}'})">
+      <div class="set-card" data-id="${s.id}" data-folder="${f.id}" onclick="openSetCard('${s.id}')">
         <div>
           <h3>${esc(s.title)}</h3>
           <div class="meta">${s.cards.length} terms${s.shared ? (isSetOwner(s) ? ' · 👥 Shared by me' : ' · 🤝 Shared with me') : ''}</div>
@@ -847,6 +847,10 @@ function renderFolder() {
       </div>`).join('') : '<div class="empty-list">No sets yet — add an existing set or create a new one above.</div>';
   }
   app.innerHTML = html;
+  // long-press to reorder, same as the home list
+  document.querySelectorAll('.set-card[data-folder]').forEach(el => {
+    el.addEventListener('pointerdown', onCardPointerDown);
+  });
 }
 function saveJoined() {
   if (user && db) db.collection('users').doc(user.uid).set({ joinedChallenges }, { merge: true }).catch(() => {});
@@ -1150,8 +1154,6 @@ function renderAccount() {
     inner = `
       <h2>Account</h2>
       <div class="auth-sub">Signed in as<br><strong style="color:var(--text)">${esc(user.email)}</strong></div>
-      <button class="btn secondary full" onclick="joinSet()">🔗 Join a shared set</button>
-      <div style="height:10px"></div>
       <button class="btn danger full" onclick="doSignOut()">Sign out</button>`;
   } else {
     inner = `
@@ -1978,7 +1980,7 @@ function onCardTouchStart(e) {
   el.addEventListener('touchcancel', onEnd);
 }
 function onCardPointerDown(e) {
-  if (homeFilter !== 'all') return; // reordering only makes sense on the full list
+  if (state.view !== 'folder' && homeFilter !== 'all') return; // home: reordering only on the full list
   if (e.target.closest('.dot-btn') || e.target.closest('.dot-menu')) return;
   const el = e.currentTarget;
   const startX = e.clientX, startY = e.clientY;
@@ -2005,11 +2007,13 @@ function beginDrag(el, startY) {
   let baseY = startY;
   const prevent = ev => ev.preventDefault();
   const setTf = y => { box.style.transform = `translateY(${y - baseY}px) scale(1.02)`; };
+  // home cards live inside .swipe-wrap wrappers; folder cards are bare .set-cards
+  const boxSel = box.classList.contains('swipe-wrap') ? '.swipe-wrap' : '.set-card[data-id]';
   const onMove = ev => {
     setTf(ev.clientY);
     const rect = box.getBoundingClientRect();
     const center = rect.top + rect.height / 2;
-    const boxes = [...document.querySelectorAll('.swipe-wrap')];
+    const boxes = [...document.querySelectorAll(boxSel)];
     const idx = boxes.indexOf(box);
     const prev = boxes[idx - 1], next = boxes[idx + 1];
     if (prev) {
@@ -2040,9 +2044,15 @@ function beginDrag(el, startY) {
     setTimeout(() => { suppressCardClick = false; }, 300);
     // persist the new DOM order
     const ids = [...document.querySelectorAll('.set-card[data-id]')].map(c => c.dataset.id);
-    sets.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
-    sharedRefs = sets.filter(s => s.shared).map(s => s.shared);
-    saveSets();
+    const folderId = el.dataset.folder;
+    if (folderId) { // reordering inside a folder
+      const f = folders.find(x => x.id === folderId);
+      if (f) { f.sets.sort((a, b) => ids.indexOf(a) - ids.indexOf(b)); saveFolders(); }
+    } else {
+      sets.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+      sharedRefs = sets.filter(s => s.shared).map(s => s.shared);
+      saveSets();
+    }
     toast('Order updated');
   };
   document.addEventListener('pointermove', onMove);
