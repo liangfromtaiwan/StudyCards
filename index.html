@@ -1436,8 +1436,8 @@ function renderChallenges() {
       </div>
       ${challengeFilter === 'mine'
         ? (mine.length ? mine.map(c => row(c, false, true)).join('') : '<div class="empty-list">Create one from any set with the 🏆 Challenge button</div>')
-        : (joined.length ? joined.map(c => row(c, true)).join('') : '<div class="empty-list">Enter a friend\'s code below to join</div>')}
-      <button class="btn secondary full" style="margin-top:8px;" onclick="joinSet()">🔗 Enter a code</button>`;
+        : (joined.length ? joined.map(c => row(c, true)).join('') : '<div class="empty-list">Enter a friend\'s code below to join</div>')
+          + '<button class="btn secondary full" style="margin-top:8px;" onclick="joinSet()">🔗 Enter a code</button>'}`;
   }
   app.innerHTML = `
     <header><div class="logo" onclick="go('home')">Study<span>Cards</span></div></header>
