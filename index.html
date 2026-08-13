@@ -3008,11 +3008,11 @@ function cardEditHTML(c, i) {
         <button class="remove" title="Remove card" onclick="removeCard(${i})">✕</button>
         <div class="num">CARD ${i + 1}</div>
         <div class="pair">
-          <input type="text" placeholder="Term (${learnLangName()})" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" oninput="ed.cards[${i}].term=this.value; autoTranslate(this, ${i}); ensureTrailingBlank(${i})">
-          <input type="text" placeholder="Definition (${appLangName()})" value="${esc(c.def)}" oninput="ed.cards[${i}].def=this.value; this.dataset.manual=this.value.trim()?'1':''; ensureTrailingBlank(${i})">
+          <input type="text" placeholder="Term (${learnLangName()})" spellcheck="true" autocapitalize="off" value="${esc(c.term)}" oninput="ed.cards[${i}].term=this.value; autoTranslate(this, ${i})">
+          <input type="text" placeholder="Definition (${appLangName()})" value="${esc(c.def)}" oninput="ed.cards[${i}].def=this.value; this.dataset.manual=this.value.trim()?'1':''">
         </div>
         <div class="ex-row">
-          <input type="text" placeholder="Example sentence (optional)" spellcheck="true" value="${esc(c.example || '')}" oninput="ed.cards[${i}].example=this.value; ensureTrailingBlank(${i})">
+          <input type="text" placeholder="Example sentence (optional)" spellcheck="true" value="${esc(c.example || '')}" oninput="ed.cards[${i}].example=this.value">
           <button class="btn secondary small suggest" title="Suggest an example from the dictionary" onclick="suggestExample(this, ${i})">✨</button>
         </div>
         <div class="spell-hint" data-hint></div>
@@ -3068,7 +3068,6 @@ async function suggestExample(btn, i) {
     const input = btn.previousElementSibling;
     input.value = ex;
     ed.cards[i].example = ex;
-    ensureTrailingBlank(i);
   } else {
     toast('No example found for this word — try writing your own');
   }
@@ -3086,14 +3085,6 @@ async function suggestExampleRow(btn) {
   else toast('No example found for this word — try writing your own');
 }
 // When the user starts typing in the LAST card, append a fresh blank card automatically
-function ensureTrailingBlank(i) {
-  if (!ed || i !== ed.cards.length - 1) return;
-  const last = ed.cards[i];
-  if (!String(last.term || '').trim() && !String(last.def || '').trim() && !String(last.example || '').trim()) return;
-  ed.cards.push({ term: '', def: '' });
-  const wrap = document.getElementById('ed-cards');
-  if (wrap) wrap.insertAdjacentHTML(edSort === 'new' ? 'afterbegin' : 'beforeend', cardEditHTML(ed.cards[ed.cards.length - 1], ed.cards.length - 1));
-}
 function addCard() {
   ed.cards.push({ term: '', def: '' });
   renderEditor();
