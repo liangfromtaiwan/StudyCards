@@ -466,6 +466,11 @@
   @keyframes ctaShine { 0% { left: -60%; } 45%, 100% { left: 130%; } }
   .cta-title { font-size: 20px; font-weight: 800; letter-spacing: .3px; }
   .cta-sub { font-size: 13.5px; font-weight: 600; opacity: .92; }
+  /* Recent words entry card on the challenges page */
+  .recent-card {
+    background: linear-gradient(135deg, #eef1ff, #e6ecff);
+    border: 1.5px solid #c9d4ff;
+  }
   /* global search results */
   mark { background: #ffe9a8; color: inherit; border-radius: 3px; padding: 0 1px; }
   .search-hit { cursor: pointer; }
@@ -890,7 +895,17 @@ let app = document.getElementById('app'); // mutable so a "ghost" render can tar
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => 'set-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const getSet = id => sets.find(s => s.id === id);
+const getSet = id => id === RECENT_ID ? recentSet() : sets.find(s => s.id === id);
+/* ----- "Recent words": a virtual set of the newest cards across every set ----- */
+const RECENT_ID = '__recent';
+function recentSet() {
+  const out = [];
+  for (const s of sets) for (const c of s.cards) if (c.addedAt) out.push({ c, s });
+  out.sort((a, b) => b.c.addedAt - a.c.addedAt);
+  const top = out.slice(0, 30); // the 30 newest words
+  // cards are the ORIGINAL objects, so quiz miss-counts land on the real sets
+  return { id: RECENT_ID, recent: true, title: '⚡ Recent words', cards: top.map(x => x.c), srcs: top.map(x => x.s.title) };
+}
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -1536,7 +1551,16 @@ function renderChallenges() {
         ${deletable ? `<button class="icon-btn" title="Delete challenge" onclick="event.stopPropagation(); deleteChallenge('${c.code}')">✕</button>` : ''}
       </div>`;
     const joinedHasNew = joined.some(j => j.isNew);
+    const recentCount = recentSet().cards.length;
     inner = `
+      ${recentCount ? `
+      <div class="set-card recent-card" onclick="go('set',{setId:'${RECENT_ID}'})">
+        <div>
+          <h3>⚡ Recent words</h3>
+          <div class="meta">Practice your ${recentCount} newest words from every set</div>
+        </div>
+        <span style="font-size:20px;">→</span>
+      </div>` : ''}
       <div class="home-chips">
         <button class="hchip ${challengeFilter === 'joined' ? 'active' : ''}" onclick="challengeFilter='joined'; render()">${hIcon('group')}Joined${joinedHasNew ? '<span class="new-dot" style="margin:0 0 0 7px;"></span>' : ''}</button>
         <button class="hchip ${challengeFilter === 'mine' ? 'active' : ''}" onclick="challengeFilter='mine'; render()">${hIcon('person')}My challenges</button>
@@ -1846,7 +1870,7 @@ function renderHome() {
     </div>`;
   if (homeFilter === 'folders') {
     html += folders.length ? folders.map(f => `
-      <div class="set-card" onclick="go('folder',{folderId:'${f.id}'})">
+      <div class="set-card" data-id="${f.id}" data-folderlist="1" onclick="openFolderCard('${f.id}')">
         <div>
           <h3>📁 ${esc(f.name)}</h3>
           <div class="meta">${f.sets.filter(id => getSet(id)).length} sets</div>
@@ -1854,6 +1878,10 @@ function renderHome() {
       </div>`).join('') : `<div class="empty-list">Folders help you organize your sets — create your first one!</div>`;
     html += `<button class="btn secondary full" style="margin-top:8px;" onclick="newFolder()">📁 ＋ New folder</button>`;
     app.innerHTML = html;
+    // long-press to reorder folders, same as sets
+    document.querySelectorAll('.set-card[data-folderlist]').forEach(el => {
+      el.addEventListener('pointerdown', onCardPointerDown);
+    });
     return;
   }
   const visibleSets = sets.filter(s => {
@@ -1912,6 +1940,10 @@ let homeFilter = 'all';
 function openSetCard(id) {
   if (suppressCardClick) return;
   go('set', { setId: id });
+}
+function openFolderCard(id) {
+  if (suppressCardClick) return;
+  go('folder', { folderId: id });
 }
 function initSetDrag() {
   document.querySelectorAll('.set-card[data-id]').forEach(el => {
@@ -1980,7 +2012,8 @@ function onCardTouchStart(e) {
   el.addEventListener('touchcancel', onEnd);
 }
 function onCardPointerDown(e) {
-  if (state.view !== 'folder' && homeFilter !== 'all') return; // home: reordering only on the full list
+  // reordering works on: the full home list, folder contents, and the folder list itself
+  if (state.view !== 'folder' && homeFilter !== 'all' && !e.currentTarget.dataset.folderlist) return;
   if (e.target.closest('.dot-btn') || e.target.closest('.dot-menu')) return;
   const el = e.currentTarget;
   const startX = e.clientX, startY = e.clientY;
@@ -2045,7 +2078,10 @@ function beginDrag(el, startY) {
     // persist the new DOM order
     const ids = [...document.querySelectorAll('.set-card[data-id]')].map(c => c.dataset.id);
     const folderId = el.dataset.folder;
-    if (folderId) { // reordering inside a folder
+    if (el.dataset.folderlist) { // reordering the folder list itself
+      folders.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+      saveFolders();
+    } else if (folderId) { // reordering inside a folder
       const f = folders.find(x => x.id === folderId);
       if (f) { f.sets.sort((a, b) => ids.indexOf(a) - ids.indexOf(b)); saveFolders(); }
     } else {
@@ -2065,6 +2101,31 @@ function beginDrag(el, startY) {
 function renderSet() {
   const s = getSet(state.setId);
   if (!s) return go('home');
+  if (s.recent) { // virtual "Recent words" set — simple read-only practice hub
+    const canQuiz = s.cards.length >= 2;
+    app.innerHTML = `
+      <div class="back" onclick="go('challenges')">← Challenges</div>
+      <div class="set-title">⚡ Recent words</div>
+      <div class="set-sub">Your ${s.cards.length} newest words, gathered from every set</div>
+      <div class="mode-grid">
+        <div class="mode-btn" onclick="startFlashcards('${RECENT_ID}')">
+          <div class="icon">🃏</div><div class="label">Flashcards</div><div class="desc">Flip cards to review</div>
+        </div>
+        <div class="mode-btn" onclick="${canQuiz ? `startQuiz('${RECENT_ID}')` : `toast('Add at least 2 new words first')`}">
+          <div class="icon">✍️</div><div class="label">Quiz</div><div class="desc">Multiple choice test</div>
+        </div>
+      </div>
+      <div class="section-title">Newest first</div>
+      ${s.cards.length ? s.cards.map((c, i) => `
+        <div class="term-row">
+          <div style="flex:1; min-width:0;">
+            <div class="term">${esc(c.term)}</div>
+            <div class="def" style="color:var(--muted); font-size:14px; margin-top:2px;">${esc(c.def)}</div>
+          </div>
+          <div class="hit-set">📚 ${esc(s.srcs[i])}</div>
+        </div>`).join('') : '<div class="empty-list">Add new words to any set and they\'ll gather here automatically.</div>'}`;
+    return;
+  }
   if (lastTermViewSet !== s.id) { termQuery = ''; termFilter = 'all'; termSort = 'new'; lastTermViewSet = s.id; }
   // Shared set: pull the latest version once per visit so partner edits show up
   if (s.shared && user && db && !state.refreshed) {
@@ -2307,7 +2368,7 @@ async function quickAdd(setId) {
   const s = getSet(setId);
   const term = termQuery;
   if (!s || !term) return;
-  const card = { term, def: '' };
+  const card = { term, def: '', addedAt: Date.now() };
   s.cards.push(card);
   saveSets();
   toast(`Added "${term}" — translating…`);
@@ -2977,7 +3038,7 @@ function applyEditorView() {
 async function quickAddEditor() {
   if (!ed || !edQuery) return;
   const term = edQuery;
-  const card = { term, def: '' };
+  const card = { term, def: '', addedAt: Date.now() };
   ed.cards.push(card);
   clearEdSearch(); // shows the new card (top of the list in New → Old)
   toast(`Added "${term}" — translating…`);
@@ -3100,11 +3161,16 @@ function removeCard(i) { ed.cards.splice(i, 1); if (!ed.cards.length) ed.cards.p
 function cancelEdit() { const back = ed && ed.id ? { view: 'set', setId: ed.id } : { view: 'home' }; ed = null; go(back.view, back); }
 function saveEdit() {
   const title = ed.title.trim();
+  // terms that already existed before this edit — anything else is a brand-new word
+  const prev = ed.id ? getSet(ed.id) : null;
+  const oldTerms = new Set(((prev && prev.cards) || []).map(c => (c.term || '').trim().toLowerCase()));
   const cards = ed.cards
     .map(c => {
       const card = { term: (c.term || '').trim(), def: (c.def || '').trim() };
       if ((c.example || '').trim()) card.example = c.example.trim();
       if (c.misses) card.misses = c.misses;
+      if (c.addedAt) card.addedAt = c.addedAt;
+      else if (card.term && !oldTerms.has(card.term.toLowerCase())) card.addedAt = Date.now(); // new word → feeds "Recent words"
       return card;
     })
     .filter(c => c.term && c.def);
