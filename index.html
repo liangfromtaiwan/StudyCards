@@ -2963,6 +2963,8 @@ function renderEditor() {
       <label>Title</label>
       <input type="text" id="ed-title" placeholder="e.g. Biology Chapter 4" value="${esc(ed.title)}" oninput="ed.title=this.value">
     </div>
+    <button class="btn secondary full" style="margin-bottom:16px;" onclick="document.getElementById('scan-file').click()">📷 Scan words from a photo</button>
+    <input type="file" id="scan-file" accept="image/*" style="display:none" onchange="scanPhoto(this.files[0]); this.value=''">
     <div class="section-title">Cards</div>
     <div class="term-toolbar">
       <div class="search-wrap">
@@ -3146,6 +3148,121 @@ async function suggestExampleRow(btn) {
   else toast('No example found for this word — try writing your own');
 }
 // When the user starts typing in the LAST card, append a fresh blank card automatically
+/* ----- Photo scan: OCR a vocabulary-book page into cards (Tesseract.js, runs in the browser) ----- */
+let tessLoading = null;
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  if (tessLoading) return tessLoading;
+  tessLoading = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js';
+    sc.onload = res;
+    sc.onerror = () => { tessLoading = null; rej(new Error('network')); };
+    document.head.appendChild(sc);
+  });
+  return tessLoading;
+}
+function scanProgressDialog(icon, title, msg) {
+  const overlay = document.getElementById('dialog');
+  overlay.innerHTML = `
+    <div class="dialog-card">
+      <div class="dialog-icon">${icon}</div>
+      <div class="dialog-title">${title}</div>
+      <div class="dialog-msg" id="scan-msg">${msg}</div>
+      <div class="progress-bar" style="margin:14px 6px 4px;"><div class="fill" id="scan-fill" style="width:0%"></div></div>
+    </div>`;
+  overlay.classList.add('open');
+}
+function scanSetProgress(pct, msg) {
+  const f = document.getElementById('scan-fill'), m = document.getElementById('scan-msg');
+  if (f) f.style.width = pct + '%';
+  if (m) m.textContent = msg;
+}
+async function scanPhoto(file) {
+  if (!file || !ed) return;
+  scanProgressDialog('📷', 'Scanning photo', 'Loading the text reader… (first time takes a moment)');
+  try { await loadTesseract(); } catch (e) {
+    closeDialog(); toast('Could not load the scanner — check your connection'); return;
+  }
+  try {
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') scanSetProgress(Math.round(m.progress * 100), 'Reading the page… ' + Math.round(m.progress * 100) + '%');
+      }
+    });
+    const { data } = await worker.recognize(file);
+    await worker.terminate();
+    closeDialog();
+    // pull out candidate English words, skipping duplicates and words already in the set
+    const existing = new Set(ed.cards.map(c => (c.term || '').trim().toLowerCase()));
+    const seen = new Set();
+    const words = [];
+    for (const m of (data.text.match(/[A-Za-z][A-Za-z'’-]{2,}/g) || [])) {
+      const w = m.toLowerCase().replace(/^['’-]+|['’-]+$/g, '');
+      if (w.length < 3 || seen.has(w) || existing.has(w)) continue;
+      seen.add(w);
+      words.push(w);
+      if (words.length >= 80) break;
+    }
+    if (!words.length) { toast('No English words found — try a sharper, well-lit photo'); return; }
+    showScanPicker(words);
+  } catch (e) {
+    closeDialog(); toast('Scan failed — try again with a clearer photo');
+  }
+}
+let scanSel = new Set();
+function showScanPicker(words) {
+  scanSel = new Set(words);
+  const overlay = document.getElementById('dialog');
+  overlay.innerHTML = `
+    <div class="dialog-card" style="display:flex; flex-direction:column; max-height:80vh;">
+      <div class="dialog-title">Found ${words.length} words</div>
+      <div class="dialog-msg">Tap a word to keep or drop it.<br>Meanings are translated automatically.</div>
+      <div style="display:flex; gap:8px; justify-content:center; margin:10px 0 4px;">
+        <button class="btn ghost small" onclick="scanToggleAll(true)">Select all</button>
+        <button class="btn ghost small" onclick="scanToggleAll(false)">Clear all</button>
+      </div>
+      <div id="scan-words" style="overflow-y:auto; display:flex; flex-wrap:wrap; gap:8px; padding:6px 2px; margin-bottom:12px;">
+        ${words.map(w => `<button class="chip active" data-w="${esc(w)}" onclick="scanToggle(this)">${esc(w)}</button>`).join('')}
+      </div>
+      <div class="dialog-actions">
+        <button class="btn secondary" onclick="closeDialog()">Cancel</button>
+        <button class="btn" id="scan-add" onclick="scanAddWords()">Add ${words.length} words</button>
+      </div>
+    </div>`;
+  overlay.classList.add('open');
+}
+function scanUpdateAddBtn() {
+  const add = document.getElementById('scan-add');
+  if (add) { add.textContent = 'Add ' + scanSel.size + (scanSel.size === 1 ? ' word' : ' words'); add.disabled = !scanSel.size; }
+}
+function scanToggle(btn) {
+  const w = btn.dataset.w;
+  if (scanSel.has(w)) { scanSel.delete(w); btn.classList.remove('active'); }
+  else { scanSel.add(w); btn.classList.add('active'); }
+  scanUpdateAddBtn();
+}
+function scanToggleAll(on) {
+  document.querySelectorAll('#scan-words .chip').forEach(b => {
+    if (on) { scanSel.add(b.dataset.w); b.classList.add('active'); }
+    else { scanSel.delete(b.dataset.w); b.classList.remove('active'); }
+  });
+  scanUpdateAddBtn();
+}
+async function scanAddWords() {
+  const words = [...scanSel];
+  if (!words.length || !ed) return;
+  const newCards = words.map(w => ({ term: w, def: '', addedAt: Date.now() }));
+  ed.cards.push(...newCards); // newest cards show on top in New → Old
+  scanProgressDialog('🌐', 'Translating…', '0 / ' + newCards.length);
+  for (let i = 0; i < newCards.length; i++) {
+    try { newCards[i].def = await translateEn2Zh(newCards[i].term); } catch (e) { /* leave blank for manual entry */ }
+    scanSetProgress(Math.round(((i + 1) / newCards.length) * 100), (i + 1) + ' / ' + newCards.length);
+  }
+  closeDialog();
+  renderEditor();
+  toast('Added ' + newCards.length + ' words — review them, then save!');
+}
 function addCard() {
   ed.cards.push({ term: '', def: '' });
   renderEditor();
