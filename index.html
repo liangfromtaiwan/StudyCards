@@ -634,6 +634,15 @@
   .dialog-actions { display: flex; gap: 10px; }
   .dialog-actions .btn { flex: 1; }
   .btn.danger-solid { background: var(--red); color: #ffffff; }
+  /* ---------- Word popup (tap a search result) ---------- */
+  .word-pop { text-align: left; }
+  .word-pop-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .word-pop-term { flex: 1; min-width: 0; font-size: 26px; font-weight: 800; color: var(--text); word-break: break-word; }
+  .word-pop .speak-btn.big { font-size: 26px; width: 52px; height: 52px; border-radius: 50%; background: #eef0ff; padding: 0; }
+  .word-pop-def { font-size: 17px; color: var(--text); margin-bottom: 12px; word-break: break-word; }
+  .word-pop-ex { display: flex; align-items: flex-start; gap: 6px; font-size: 14px; font-style: italic; color: var(--muted); line-height: 1.5; margin-bottom: 12px; }
+  .word-pop-ex span { flex: 1; min-width: 0; }
+  .word-pop-src { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
 
   /* ---------- Toast ---------- */
   #toast {
@@ -1827,8 +1836,9 @@ function renderGlobalResults() {
     return;
   }
   const qRaw = globalQuery.trim();
-  el.innerHTML = hits.map(({ s, c }) => `
-    <div class="term-row search-hit" onclick="openSearchHit('${s.id}')">
+  searchHits = hits;
+  el.innerHTML = hits.map(({ s, c }, i) => `
+    <div class="term-row search-hit" onclick="showWordPopup(${i})">
       <div style="flex:1; min-width:0;">
         <div class="term">${hl(c.term, qRaw)}</div>
         <div class="def">${hl(c.def, qRaw)}</div>
@@ -1836,6 +1846,29 @@ function renderGlobalResults() {
       </div>
       <div class="hit-set">📚 ${esc(s.title)}</div>
     </div>`).join('');
+}
+// tap a result → popup with the word + 🔊, mostly to hear how it's pronounced
+let searchHits = [];
+function showWordPopup(i) {
+  const hit = searchHits[i];
+  if (!hit) return;
+  const { s, c } = hit;
+  const overlay = document.getElementById('dialog');
+  overlay.innerHTML = `
+    <div class="dialog-card word-pop">
+      <div class="word-pop-head">
+        <div class="word-pop-term">${esc(c.term)}</div>
+        ${speakBtn(c.term, termLang()).replace('class="speak-btn"', 'class="speak-btn big"')}
+      </div>
+      ${c.def ? `<div class="word-pop-def">${esc(c.def)}</div>` : ''}
+      ${c.example ? `<div class="word-pop-ex"><span>${esc(c.example)}</span>${speakBtn(c.example, termLang())}</div>` : ''}
+      <div class="word-pop-src">📚 ${esc(s.title)}</div>
+      <div class="dialog-actions">
+        <button class="btn secondary" onclick="closeDialog()">Close</button>
+        <button class="btn" onclick="closeDialog(); openSearchHit(searchHits[${i}].s.id)">Open set</button>
+      </div>
+    </div>`;
+  overlay.classList.add('open');
 }
 function openSearchHit(setId) {
   // open the set pre-filtered to the search, so the card is right there
@@ -2650,6 +2683,7 @@ function showDangerDialog(icon, title, messageHTML, confirmLabel, onConfirm) {
   document.getElementById('dialog-confirm').onclick = () => { closeDialog(); onConfirm(); };
 }
 function closeDialog() {
+  if (document.querySelector('#dialog .speak-btn.speaking')) stopSpeaking();
   const overlay = document.getElementById('dialog');
   overlay.classList.remove('open');
   overlay.innerHTML = '';
