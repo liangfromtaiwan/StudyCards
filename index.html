@@ -727,37 +727,165 @@ function saveSets() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sets));
     localStorage.setItem('studycards.owner', user ? user.uid : 'local'); // who this cache belongs to
   } catch (e) { /* ignore */ }
-  if (user && db) {
-    const own = sets.filter(s => !s.shared);
-    const order = sets.map(s => s.id); // remembers the mixed shared/own ordering
-    // challenge codes keyed by set id — shared sets are rebuilt from the cloud on load,
-    // so their challengeCode must be stored separately or it gets lost
-    const challengeCodes = {};
-    for (const s of sets) if (s.challengeCode) challengeCodes[s.id] = s.challengeCode;
-    db.collection('users').doc(user.uid)
-      .set({ sets: own, sharedRefs, order, challengeCodes, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
-      .catch(e => toast('Cloud sync failed: ' + e.message));
-    // keep my challenges in sync with their sets: when the cards actually change,
-    // push the new cards + a timestamp so joiners get a "new words" badge
-    for (const s of sets) {
-      if (!s.challengeCode || !(s.challengeCode in challengeSig)) continue; // only my own, once seeded
-      const sig = cardSig(s.cards);
-      if (sig === challengeSig[s.challengeCode]) continue;
-      challengeSig[s.challengeCode] = sig;
-      db.collection('challenges').doc(s.challengeCode)
-        .set({
-          title: s.title,
-          cards: s.cards.map(c => ({ term: c.term, def: c.def, ...(c.example ? { example: c.example } : {}) })),
-          cardsUpdatedAt: Date.now()
-        }, { merge: true }).catch(() => {});
-    }
-    for (const s of sets.filter(s => s.shared)) {
-      db.collection('sharedSets').doc(s.shared)
-        .set({ title: s.title, cards: s.cards, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
-        .catch(e => toast('Shared set sync failed: ' + e.message));
-    }
-  }
+  if (user && db) queueSync(true);
 }
+/* ----- Cloud sync: 3-way merge (last-seen cloud ⇄ this device ⇄ cloud now) -----
+   Writing this device's whole copy used to wipe words added on another device
+   (or by a study partner) whenever a stale tab saved anything — even a flashcard swipe.
+   Now every write reads the cloud first and only applies what changed on THIS device. */
+let cloudBase = { own: null, shared: {} }; // the cloud version this device last saw
+let syncChain = Promise.resolve(), syncQueued = false, syncDirty = false;
+const snapCopy = v => JSON.parse(JSON.stringify(v));
+const cardKey = c => (c.term || '').trim().toLowerCase();
+function setBaseShared(code, title, cards) { cloudBase.shared[code] = snapCopy({ title, cards: cards || [] }); }
+function mergeCards(base, local, remote) {
+  if (JSON.stringify(base) === JSON.stringify(remote)) return local; // nobody else changed it
+  const b = new Map(base.map(c => [cardKey(c), c]));
+  const l = new Map(local.map(c => [cardKey(c), c]));
+  const out = [];
+  for (const r of remote) {
+    const k = cardKey(r), lc = l.get(k);
+    if (b.has(k) && !lc) continue; // deleted on this device
+    const editedHere = lc && (!b.has(k) || JSON.stringify(lc) !== JSON.stringify(b.get(k)));
+    out.push(editedHere ? lc : r);
+  }
+  // words added on this device: insert after the word they follow locally
+  const inOut = new Set(out.map(cardKey));
+  let prev = null;
+  for (const c of local) {
+    const k = cardKey(c);
+    if (!inOut.has(k) && !b.has(k)) {
+      const at = prev === null ? 0 : out.findIndex(x => cardKey(x) === prev) + 1;
+      out.splice(at, 0, c);
+      inOut.add(k);
+    }
+    if (inOut.has(k)) prev = k;
+  }
+  return out;
+}
+function mergeSet(base, local, remote) {
+  const title = base && local.title === base.title ? remote.title : local.title;
+  return { ...remote, ...local, title, cards: mergeCards((base && base.cards) || [], local.cards || [], remote.cards || []) };
+}
+// put merged cards back into the live set, reusing the card objects flashcards/quiz hold on to
+function adoptCards(localCards, merged) {
+  const pool = new Map();
+  for (const c of localCards) { const k = cardKey(c); if (!pool.has(k)) pool.set(k, []); pool.get(k).push(c); }
+  return merged.map(m => {
+    const c = (pool.get(cardKey(m)) || []).shift();
+    if (!c) return { ...m };
+    if (c !== m) { for (const k of Object.keys(c)) if (!(k in m)) delete c[k]; Object.assign(c, m); }
+    return c;
+  });
+}
+function queueSync(dirty) {
+  if (dirty) syncDirty = true;
+  if (syncQueued) return syncChain;
+  syncQueued = true;
+  syncChain = syncChain.then(() => { syncQueued = false; return syncToCloud(); });
+  return syncChain;
+}
+async function syncToCloud() {
+  if (!user || !db) return;
+  const uidNow = user.uid, dirty = syncDirty;
+  syncDirty = false;
+  let changed = false;
+  try {
+    // 1) shared sets: only the ones edited here — or all of them on a refresh pull
+    for (const s of sets.filter(s => s.shared)) {
+      const code = s.shared, base = cloudBase.shared[code];
+      if (dirty && base && JSON.stringify({ title: s.title, cards: s.cards }) === JSON.stringify(base)) continue;
+      const ref = db.collection('sharedSets').doc(code);
+      let merged = null, before = '';
+      await db.runTransaction(async t => {
+        const d = await t.get(ref);
+        merged = null;
+        if (!d.exists) return; // unshared by the owner
+        const r = d.data();
+        before = JSON.stringify({ title: s.title, cards: s.cards });
+        merged = mergeSet(base, { title: s.title, cards: s.cards }, { title: r.title, cards: r.cards || [] });
+        if (JSON.stringify({ t: merged.title, c: merged.cards }) !== JSON.stringify({ t: r.title, c: r.cards || [] }))
+          t.set(ref, { title: merged.title, cards: snapCopy(merged.cards), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      });
+      if (!merged || user?.uid !== uidNow) continue;
+      if (JSON.stringify({ title: s.title, cards: s.cards }) !== before) { syncDirty = true; continue; } // edited mid-sync: merge again next round
+      if (JSON.stringify({ title: s.title, cards: s.cards }) !== JSON.stringify({ title: merged.title, cards: merged.cards })) changed = true;
+      s.title = merged.title;
+      s.cards = adoptCards(s.cards, merged.cards);
+      setBaseShared(code, s.title, s.cards);
+    }
+    // 2) my own sets + account fields
+    const ref = db.collection('users').doc(uidNow);
+    let mergedOwn = null, before = '';
+    await db.runTransaction(async t => {
+      const d = await t.get(ref);
+      const data = d.exists ? d.data() : {};
+      const remote = Array.isArray(data.sets) ? data.sets : [];
+      const local = sets.filter(s => !s.shared);
+      before = JSON.stringify(local);
+      const baseMap = new Map((cloudBase.own || []).map(s => [s.id, s]));
+      const localMap = new Map(local.map(s => [s.id, s]));
+      const remoteIds = new Set(remote.map(s => s.id));
+      mergedOwn = [];
+      for (const r of remote) {
+        const l = localMap.get(r.id), b = baseMap.get(r.id);
+        if (!l) { if (!b) mergedOwn.push(r); continue; } // made on another device / deleted here
+        mergedOwn.push(b && JSON.stringify(l) === JSON.stringify(b) ? r : mergeSet(b, l, r));
+      }
+      for (const l of local) if (!remoteIds.has(l.id) && !baseMap.has(l.id)) mergedOwn.push(l); // made here
+      if (!dirty && JSON.stringify(mergedOwn) === JSON.stringify(remote)) return; // refresh pull, nothing to push
+      const ids = new Set(mergedOwn.map(s => s.id));
+      const order = [...sets.filter(s => s.shared || ids.has(s.id)).map(s => s.id), ...mergedOwn.map(s => s.id).filter(id => !localMap.has(id))];
+      // challenge codes keyed by set id — shared sets are rebuilt from the cloud on load,
+      // so their challengeCode must be stored separately or it gets lost
+      const challengeCodes = {};
+      for (const s of [...sets.filter(s => s.shared), ...mergedOwn]) if (s.challengeCode) challengeCodes[s.id] = s.challengeCode;
+      t.set(ref, { sets: snapCopy(mergedOwn), sharedRefs, order, challengeCodes, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    });
+    if (user?.uid !== uidNow) return;
+    if (JSON.stringify(sets.filter(s => !s.shared)) !== before) { syncDirty = true; queueSync(); return; }
+    // rebuild the live list: keep this device's order, drop sets deleted elsewhere, append new ones
+    const mm = new Map(mergedOwn.map(s => [s.id, s]));
+    const next = [];
+    for (const s of sets) {
+      if (s.shared) { next.push(s); continue; }
+      const m = mm.get(s.id);
+      if (!m) { changed = true; continue; }
+      if (JSON.stringify(m) !== JSON.stringify(s)) { changed = true; Object.assign(s, m, { cards: adoptCards(s.cards, m.cards || []) }); }
+      next.push(s); mm.delete(s.id);
+    }
+    for (const m of mm.values()) { next.push(snapCopy(m)); changed = true; }
+    sets = next;
+    cloudBase.own = snapCopy(mergedOwn);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sets)); } catch (e) {}
+    if (syncDirty) queueSync();
+  } catch (e) {
+    syncDirty = syncDirty || dirty; // keep it pending — retried on the next save / when back online
+    if (navigator.onLine) toast('Cloud sync failed: ' + e.message);
+    return;
+  }
+  // keep my challenges in sync with their sets: when the cards actually change,
+  // push the new cards + a timestamp so joiners get a "new words" badge
+  for (const s of sets) {
+    if (!s.challengeCode || !(s.challengeCode in challengeSig)) continue; // only my own, once seeded
+    const sig = cardSig(s.cards);
+    if (sig === challengeSig[s.challengeCode]) continue;
+    challengeSig[s.challengeCode] = sig;
+    db.collection('challenges').doc(s.challengeCode)
+      .set({
+        title: s.title,
+        cards: s.cards.map(c => ({ term: c.term, def: c.def, ...(c.example ? { example: c.example } : {}) })),
+        cardsUpdatedAt: Date.now()
+      }, { merge: true }).catch(() => {});
+  }
+  if (changed && SYNC_SAFE_VIEWS.includes(state.view)) render();
+}
+// views that can re-render under the user without losing their place
+const SYNC_SAFE_VIEWS = ['home', 'set', 'folder', 'search', 'challenges', 'account'];
+// a tab/PWA left in the background is the stale copy that used to overwrite newer data —
+// pull the latest whenever the app comes back to the foreground or back online
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && user && db) queueSync(); });
+window.addEventListener('online', () => { if (user && db) queueSync(); });
 let sets = loadSets();
 let user = null, db = null;
 let sharedRefs = [];
@@ -1302,7 +1430,9 @@ async function loadCloudSets() {
     let own;
     if (data && Array.isArray(data.sets)) {
       own = data.sets;
+      cloudBase.own = snapCopy(data.sets);
     } else {
+      cloudBase.own = [];
       // first sign-in on this account: migrate local data ONLY if it was created
       // while signed out — never inherit another account's cached data
       let owner = 'local';
@@ -1316,6 +1446,7 @@ async function loadCloudSets() {
         if (d.exists) {
           const sd = d.data();
           shared.push({ id: 'shared-' + code, shared: code, owner: sd.createdBy, title: sd.title, cards: sd.cards || [] });
+          setBaseShared(code, sd.title, sd.cards);
         }
       } catch (e) { /* skip unreachable shared set */ }
     }
@@ -1359,6 +1490,7 @@ async function shareSet(setId) {
     });
     s.shared = code;
     s.id = 'shared-' + code;
+    setBaseShared(code, s.title, s.cards);
     sharedRefs.push(code);
     saveSets();
     go('set', { setId: s.id });
@@ -1842,6 +1974,7 @@ function showJoinConfirm(type, code, data) {
     } else {
       sharedRefs.push(code);
       sets.unshift({ id: 'shared-' + code, shared: code, owner: data.createdBy, title: data.title, cards: data.cards || [] });
+      setBaseShared(code, data.title, data.cards);
       saveSets();
       toast('Joined "' + data.title + '"');
       go('set', { setId: 'shared-' + code });
@@ -2133,10 +2266,13 @@ function renderSet() {
     db.collection('sharedSets').doc(s.shared).get().then(d => {
       if (!d.exists) return;
       const sd = d.data();
+      s.owner = sd.createdBy;
+      const base = cloudBase.shared[s.shared];
+      if (!base || JSON.stringify({ title: s.title, cards: s.cards }) !== JSON.stringify(base)) { queueSync(true); return; } // unsynced edits here → merge instead
       const changed = JSON.stringify({ t: s.title, c: s.cards }) !== JSON.stringify({ t: sd.title, c: sd.cards || [] });
       s.title = sd.title;
-      s.cards = sd.cards || [];
-      s.owner = sd.createdBy;
+      s.cards = adoptCards(s.cards, sd.cards || []);
+      setBaseShared(s.shared, s.title, s.cards);
       // old shared sets: fill in the sharer's name once the owner opens it
       if (user && sd.createdBy === user.uid && !sd.creatorName) {
         db.collection('sharedSets').doc(s.shared).set({ creatorName: ensureDisplayName() }, { merge: true }).catch(() => {});
@@ -3317,9 +3453,9 @@ function saveEdit() {
       else if (card.term && !oldTerms.has(card.term.toLowerCase())) card.addedAt = Date.now(); // new word → feeds "Recent words"
       return card;
     })
-    .filter(c => c.term && c.def);
+    .filter(c => c.term); // keep words still waiting for a definition (e.g. translation failed)
   if (!title) { toast('Please enter a title'); return; }
-  if (!cards.length) { toast('Add at least one complete card'); return; }
+  if (!cards.length) { toast('Add at least one word'); return; }
   if (ed.id) {
     const s = getSet(ed.id);
     s.title = title; s.cards = cards;
@@ -3542,6 +3678,7 @@ if (FIREBASE_ENABLED) {
     const wasSignedIn = !!user;
     user = u;
     myCloudChallenges = null; // never show another account's challenge list
+    cloudBase = { own: null, shared: {} };
     challengeSig = {};
     joinedNew = {};
     if (u) {
