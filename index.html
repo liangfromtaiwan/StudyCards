@@ -1042,7 +1042,80 @@ function toast(msg) {
   clearTimeout(t._h);
   t._h = setTimeout(() => t.classList.remove('show'), 2200);
 }
-function go(view, extra = {}) { state = { view, ...extra }; render(); window.scrollTo(0, 0); }
+function go(view, extra = {}) {
+  const from = state.view;
+  state = { view, ...extra };
+  render();
+  window.scrollTo(0, 0);
+  // the editor / a finished quiz shouldn't stay in history — replace them instead of stacking
+  syncUrl(from === 'edit' || (from === 'quiz' && view === 'quizResult'));
+}
+/* ----- URL routing: every page gets its own #/ address, so the browser / phone back
+   button and refresh stay inside StudyCards instead of leaving the site.
+   Hash routes work on GitHub Pages without a 404 fallback. ----- */
+const ROUTED = ['home', 'set', 'folder', 'flashcards', 'quiz', 'quizResult', 'edit', 'challenges', 'challengeLobby', 'search', 'account'];
+let navStack = [], navIdx = -1; // mirror of this tab's history entries, to tell "back" from "new page"
+function routeOf(st) {
+  const e = encodeURIComponent, base = location.pathname + location.search;
+  switch (st.view) {
+    case 'set': return base + '#/set/' + e(st.setId);
+    case 'flashcards': case 'quiz': case 'quizResult':
+      if (st.setId) return base + '#/set/' + e(st.setId) + '/' + st.view.toLowerCase();
+      return base + (lobby ? '#/challenge/' + e(lobby.code) + '/' + st.view.toLowerCase() : '#/challenges');
+    case 'edit': return base + (ed && ed.id ? '#/set/' + e(ed.id) + '/edit' : '#/new');
+    case 'folder': return base + '#/folder/' + e(st.folderId);
+    case 'challengeLobby': return base + (lobby ? '#/challenge/' + e(lobby.code) : '#/challenges');
+    case 'challenges': case 'search': case 'account': return base + '#/' + st.view;
+    default: return base; // home
+  }
+}
+// URL → page. Pages that need in-memory state (quiz, flashcards, editor) fall back to their set.
+function stateFromRoute() {
+  const m = location.hash.match(/^#\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?/);
+  if (!m) return { view: 'home' };
+  const a = m[1], id = m[2] && decodeURIComponent(m[2]), sub = m[3];
+  if (a === 'set' && id && getSet(id)) {
+    if (sub === 'edit' && ed && ed.id === id) return { view: 'edit' };
+    return { view: 'set', setId: id };
+  }
+  if (a === 'new' && ed && !ed.id) return { view: 'edit' };
+  if (a === 'folder' && folders.some(f => f.id === id)) return { view: 'folder', folderId: id };
+  if (a === 'challenge') return lobby && lobby.code === id ? { view: 'challengeLobby' } : { view: 'challenges' };
+  if (['challenges', 'search', 'account'].includes(a)) return { view: a };
+  return { view: 'home' };
+}
+function syncUrl(replace) {
+  if (!ROUTED.includes(state.view)) return; // login etc. keep the current address
+  const url = routeOf(state);
+  if (navIdx < 0) { navIdx = (history.state && history.state.i) || 0; navStack[navIdx] = location.pathname + location.search + location.hash; }
+  if (navStack[navIdx] === url) return;
+  if (navIdx > 0 && navStack[navIdx - 1] === url) { navIdx--; history.back(); return; } // in-app "← back" = a real back
+  if (replace) { navStack[navIdx] = url; history.replaceState({ i: navIdx }, '', url); return; }
+  navIdx++;
+  navStack.length = navIdx;
+  navStack.push(url);
+  history.pushState({ i: navIdx }, '', url);
+}
+// show whatever page the address points to (first load, sign-in, refresh)
+function goRoute() {
+  state = stateFromRoute();
+  render();
+  window.scrollTo(0, 0);
+  syncUrl(true);
+}
+window.addEventListener('popstate', e => {
+  const i = e.state && typeof e.state.i === 'number' ? e.state.i : 0;
+  navIdx = i;
+  navStack[i] = location.pathname + location.search + location.hash;
+  if (FIREBASE_ENABLED && !user) return;         // still on the login screen
+  if (routeOf(state) === navStack[i]) return;    // already showing it (in-app back rendered first)
+  if (typeof closeDialog === 'function') closeDialog();
+  state = stateFromRoute();
+  render();
+  window.scrollTo(0, 0);
+  const url = routeOf(state);                    // e.g. a quiz URL lands on its set
+  if (url !== navStack[i]) { navStack[i] = url; history.replaceState({ i }, '', url); }
+});
 
 /* =====================  Text-to-speech  ===================== */
 let voicesReady = [];
@@ -3685,7 +3758,7 @@ if (FIREBASE_ENABLED) {
       await loadCloudSets();
       fetchMyChallenges(); // seed the card-content cache so set edits sync to my challenges
       if (maybeDemo()) return;
-      go('home');
+      goRoute(); // reopen the page in the address (refresh / shared link), else home
       toast('Signed in as ' + u.email);
     } else {
       // signed out: if the local cache belonged to a cloud account, reset it
@@ -3712,7 +3785,7 @@ if (FIREBASE_ENABLED) {
     }
   });
 } else {
-  if (!maybeDemo()) render();
+  if (!maybeDemo()) goRoute();
 }
 </script>
 </body>
